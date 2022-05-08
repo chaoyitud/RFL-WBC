@@ -377,12 +377,20 @@ This requires you to have enabled the GCR in your GCE project beforehand. Make s
 Docker Buildkit, or remove the `DOCKER_BUILDKIT=1` part from the command before running (this might require additional changes
 in the Dockerfile).
 
+**N.B.** When running for the first time, make sure to have downloaded the Datasets used in the repo.
+This can be done by executing the following command with an activated environment.
+
+```bash
+python3 -m fltk extractor configs/example_cloud_experiment.json
+```
+
+To build the container and push to your GCR repository, execute the following commands.
 ```bash
 DOCKER_BUILDKIT=1 docker build . --tag gcr.io/test-bed-distml/fltk
 docker push gcr.io/test-bed-distml/fltk
 ```
 
-**N.B.** when running in Minikube, you can also set up a local registry. An example of how this can be quickly achieved 
+**N.B.** when running in Minikube, you can also set up a local registry. An example of how this can be achieved 
 can be found [in this Medium post by Shashank Srivastava](https://shashanksrivastava.medium.com/how-to-set-up-minikube-to-use-your-local-docker-registry-10a5b564883).
 
 
@@ -411,16 +419,50 @@ many small files is slow (as they will be compressed individually). The command 
 kubectl cp --namespace test fl-extractor:/opt/federation-lab/logging ./logging
 ```
 
+⚠️ Make sure to test your configurations before running your experiments, to ensure that your data is written in a
+persistent fashion. Writing to a directory that is not mounted to an NFS disk may result in dataloss.
+
+⚠️ For federated learning experiments, data is written by the Federator to a disk, as such only a single mount of an
+NFS is needed  (see for example how [`V1PytorchTrainJob`](fltk/util/cluster/client.py)s are constructed by the Orchestrator).
+It is advisable to load the data of Federated learning experiments using the `pandas` library, this can be done as follows.
+For data exploration, using a Jupyter Notebook may be advisable.
+
+```python
+import pandas as pd
+experiment_file = 'path/to/your/experiment.csv'
+df = pd.read_csv(experiment_file)
+
+df
+```
+This should display the contents of the csv file parsed into a `pd.DataFrame`, which should have the following schema.
+```
+round_id,train_duration,test_duration,round_duration,num_epochs,trained_items,accuracy,train_loss,test_loss,timestamp,node_name,confusion_matrix
+```
+
+
 ### Launching an experiment
 We have now completed the setup of the project and can continue by running actual experiments. If no errors occur, this
 should. You may also skip this step and work on your code, but it might be good to test your deployment
 before running into trouble later.
 
+#### Federated Experiment
 ```bash
 helm install flearner charts/orchestrator --namespace test -f charts/fltk-values.yaml\
   --set-file orchestrator.experiment=./configs/federated_tasks/example_arrival_config.json,\
   orchestrator.configuration=./configs/example_cloud_experiment.json
 ```
+
+#### Distributed Experiment
+```bash
+helm install flearner charts/orchestrator --namespace test -f charts/fltk-values.yaml\
+  --set-file orchestrator.experiment=./configs/distributed_tasks/example_arrival_config.json,\
+  orchestrator.configuration=./configs/example_cloud_experiment.json
+```
+
+**N.B.** The `./configs/distributed_tasks` and `./configs/distributed_tasks` dictories contain experiment configurations,
+i.e. which networks should be run, etc. The `./configs/example_cloud_experiment.json` file contains shared configuration 
+information, e.g. on how to log experiments. Make sure to ensure that all data can be saved to a persistent volume. 
+E.g. by creating a shared volume for `models` and saving to the corresponding directory.
 
 To debug the deployment append with the `--debug` flag, note that you may need to uninstall a prior deployment.
 Alternatively, you can use the `upgrade` argument, however, currently the orchestrator does not support updated
@@ -461,4 +503,5 @@ Which will collect and run all the tests in the repository, and show in `verbose
 
 ## Known issues / Limitations
 
-* Currently, there is no GPU support in the Docker containers.
+* Currently, there is no GPU support in the Docker containers, for this the `Dockerfile` will need to be updated to
+accomodate for this.

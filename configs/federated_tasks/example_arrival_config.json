@@ -1,5 +1,6 @@
 [
   {
+    "type": "federated",
     "jobClassParameters": {
       "networkConfiguration": {
         "network": "FashionMNISTCNN",
