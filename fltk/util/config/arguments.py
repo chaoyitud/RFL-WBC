@@ -1,9 +1,11 @@
+import logging
 from argparse import Namespace, ArgumentParser
 from dataclasses import dataclass
-from typing import List, Tuple, Type, Dict, T
+from typing import List, Tuple, Type, Dict, T, Union
 
 import torch.distributed as dist
 import torch.nn
+from dataclasses_json import dataclass_json
 
 import fltk.nets as nets
 from fltk.datasets import CIFAR10Dataset, FashionMNISTDataset, CIFAR100Dataset, MNIST
@@ -40,16 +42,20 @@ _available_data = {
 }
 
 _available_loss = {
-    "CROSSENTROPY": torch.nn.CrossEntropyLoss
+    "CROSSENTROPYLOSS": torch.nn.CrossEntropyLoss,
+    "HUBERLOSS" : torch.nn.HuberLoss
 }
 
-_available_optimizer = {
-    "ADAM": torch.optim.Adam
+_available_optimizer: Dict[str, Type[torch.optim.Optimizer]] = {
+    "SGD": torch.optim.SGD,
+    "ADAM": torch.optim.Adam,
+    "ADAMW": torch.optim.AdamW
 }
 
 
+@dataclass_json
 @dataclass(frozen=True)
-class LearningParameters: # pylint: disable=too-many-instance-attributes
+class LearningParameters:  # pylint: disable=too-many-instance-attributes
     """
     Class encapsulating LearningParameters, for now used under DistributedLearning.
     """
@@ -61,6 +67,13 @@ class LearningParameters: # pylint: disable=too-many-instance-attributes
     learning_decay: float
     loss: str
     optimizer: str
+    optimizer_args: Union[float, List[float]]
+    scheduler_step_size: int
+    scheduler_gamma: float
+    min_lr: float
+
+    cuda: bool
+    seed: int
 
     @staticmethod
     def __safe_get(lookup: Dict[str, T], keyword: str) -> T:
@@ -74,6 +87,8 @@ class LearningParameters: # pylint: disable=too-many-instance-attributes
         @rtype: T
         """
         safe_keyword = str.upper(keyword)
+        if safe_keyword not in lookup:
+            logging.fatal(f"Cannot find configuration parameter {keyword} in dictionary.")
         return lookup.get(safe_keyword)
 
     def get_model_class(self) -> Type[torch.nn.Module]:
@@ -110,6 +125,7 @@ class LearningParameters: # pylint: disable=too-many-instance-attributes
         """
         return self.__safe_get(_available_optimizer, self.optimizer)
 
+
 def extract_learning_parameters(args: Namespace) -> LearningParameters:
     """
     Function to extract the learning hyperparameters from the Namespace object for the passed arguments.
@@ -122,13 +138,11 @@ def extract_learning_parameters(args: Namespace) -> LearningParameters:
     dataset = args.dataset
     batch_size = args.batch_size
     epoch = args.max_epoch
-    lr = args.learning_rate # pylint: disable=invalid-name
+    lr = args.learning_rate  # pylint: disable=invalid-name
     decay = args.decay
     loss = args.loss
     optimizer = args.optimizer
     return LearningParameters(model, dataset, batch_size, epoch, lr, decay, loss, optimizer)
-
-
 
 
 def _add_shared_hyperparameters(subparser):
@@ -159,11 +173,7 @@ def _create_client_parser(subparsers) -> None:
     client_parser = subparsers.add_parser('client')
     client_parser.add_argument('config', type=str)
     client_parser.add_argument('task_id', type=str)
-
-    # TODO: Combine these with FLTK parameter configurator for de-duplication.
-    # Add hyper-parameters
-    _add_shared_hyperparameters(client_parser)
-
+    client_parser.add_argument('experiment_config', type=str)
     # Add parameter parser for backend
     client_parser.add_argument('--backend', type=str, help='Distributed backend',
                                choices=[dist.Backend.GLOO, dist.Backend.NCCL, dist.Backend.MPI],

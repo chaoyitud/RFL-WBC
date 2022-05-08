@@ -118,9 +118,11 @@ class Arrival:
         return self.task.learning_parameters
 
 
-class DistributedExperimentGenerator(ArrivalGenerator):
+class SimulatedArrivalGenerator(ArrivalGenerator):
     """
-    Distributed experiments (on K8s) Experiment generator.
+    Experiments (on K8s) generator that simulates the arrival of training tasks according to a pre-defined distribution.
+    As such, a set of clients can be simulated that submit various types of training jobs. See also
+    BatchArrivalGenerator for an implementation that will directly schedule all arrivals on the cluster.
     """
     job_dict: Dict[str, JobDescription] = None
 
@@ -128,7 +130,7 @@ class DistributedExperimentGenerator(ArrivalGenerator):
     _decrement = 10
 
     def __init__(self, custom_config: Path = None):
-        super(DistributedExperimentGenerator, self).__init__(custom_config or self.configuration_path)
+        super(SimulatedArrivalGenerator, self).__init__(custom_config or self.configuration_path)
         self.load_config()
 
     def set_logger(self, name: str = None):
@@ -201,14 +203,17 @@ class DistributedExperimentGenerator(ArrivalGenerator):
         self.logger.info(msg)
 
 
-class FederatedArrivalGenerator(ArrivalGenerator):
+class SequentialArrivalGenerator(ArrivalGenerator):
     """
-    Arrival Generator implementation for Federated Learning (i.e. spawning sequential experiments with
-    configuration maps). Distributed Learning Generator will be matched new execution later.
+    Experiments (on K8s) generator that directly generates all arrivals to be executed. This will rely on the scheduling
+    policy of Kubeflows' Pytorch TrainOperator.
+    This allows for running batches of train jobs, e.g. to run a certain experiment configuration with a number of
+    replications in a fire-and-forget fashion. SimulatedArrivalGenerator for an implementation that will simulate
+    arrivals following a pre-defined distribution.
     """
 
     def __init__(self, custom_config: Path):
-        super(FederatedArrivalGenerator, self).__init__(custom_config)
+        super(SequentialArrivalGenerator, self).__init__(custom_config)
         self.load_config()
 
     def set_logger(self, name: str = None):
@@ -216,14 +221,26 @@ class FederatedArrivalGenerator(ArrivalGenerator):
         self.logger = logging.getLogger(logging_name)
 
     def run(self, duration: float):
+        """
+        Helper method to start experiments. Curent implementations only runs without duration. I.e. this method
+        runs in a fire-and-forget fashion without obeying to the duration parameter that may have been set.
+        @param duration:
+        @type duration:
+        @return:
+        @rtype:
+        """
         self.start_time = time.time()
 
         description: JobDescription
         for job_name, description in self.job_dict.items():
             for repl, seed in enumerate(description.job_class_parameters.experiment_configuration.random_seed):
                 replication_name = f"{job_name}_{repl}_{seed}"
-                train_task = TrainTask(replication_name, description.job_class_parameters, description.priority,
-                                       description.get_experiment_configuration(), replication=repl)
+                train_task = TrainTask(identity=replication_name,
+                                       job_parameters=description.job_class_parameters,
+                                       priority=description.priority,
+                                       experiment_config=description.get_experiment_configuration(),
+                                       replication=repl,
+                                       experiment_type=description.experiment_type)
 
                 arrival = Arrival(None, train_task, job_name)
                 self.arrivals.put(arrival)

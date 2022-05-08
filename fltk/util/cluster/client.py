@@ -16,7 +16,7 @@ from fltk.util.cluster.conversion import Convert
 from fltk.util.config import DistributedConfig
 from fltk.util.singleton import Singleton
 from fltk.util.task.config.parameter import SystemResources
-from fltk.util.task.task import DistributedArrivalTask, ArrivalTask
+from fltk.util.task.task import DistributedArrivalTask, ArrivalTask, FederatedArrivalTask
 
 
 @dataclass
@@ -202,12 +202,12 @@ class ClusterManager(metaclass=Singleton):
         self._stop()
 
 
-def _generate_command(config: DistributedConfig, task: ArrivalTask, federated=True) -> List[str]:
+def _generate_command(config: DistributedConfig, task: ArrivalTask, tpe: Optional[str] = None) -> List[str]:
     """
     Function to generate commands for containers to start working with. Either a federated learnign command
     will be realized, or a distributed learning command. Note that distributed learning commands will be revised
     in an upcomming version of KFLTK.
-    @param config:
+    @param config: DistributedConfiguration map with share
     @type config:
     @param task:
     @type task:
@@ -216,15 +216,14 @@ def _generate_command(config: DistributedConfig, task: ArrivalTask, federated=Tr
     @return:
     @rtype:
     """
-    if not federated:
-        command = (f'python3 -m fltk client {config.config_path} {task.id} '
-                   f'--model {task.network} --dataset {task.dataset} '
-                   f'--optimizer Adam --max_epoch {task.param_conf.max_epoch} '
-                   f'--batch_size {task.param_conf.bs} --learning_rate {task.param_conf.lr} '
-                   f'--decay {task.param_conf.lr_decay} --loss CrossEntropy '
-                   f'--backend gloo')
-    else:
+    federated = isinstance(task, FederatedArrivalTask)
+    if federated:
+        # Perform Federated Learning experiment.
         command = ('python3 -m fltk remote experiments/node.config.yaml')
+    else:
+        command = (f'python3 -m fltk client {config.config_path} {task.id} '
+                   f'experiments/node.config.yaml '
+                   f'--backend gloo')
     return command.split(' ')
 
 
@@ -250,6 +249,12 @@ def _build_typed_container(conf: DistributedConfig, cmd: List[str], resources: V
     volume_mounts.append(V1VolumeMount(
             mount_path='/opt/federation-lab/experiments',
             name=experiment_name,
+            read_only=True
+    ))
+    # Mount the runtime configuration configmap as a volume to use shared configuration.
+    volume_mounts.append(V1VolumeMount(
+            mount_path='/opt/federation-lab/config',
+            name='fltk-orchestrator-config-volume',
             read_only=True
     ))
     # Create mount for configuration
@@ -325,8 +330,8 @@ class DeploymentBuilder:
         @rtype:
         """
         # TODO: Implement cmd / config reference.
-        cmd = _generate_command(conf, task)
         for indx, (tpe, curr_resource) in enumerate(self._build_description.resources.items()):
+            cmd = _generate_command(conf, task, tpe)
             container = _build_typed_container(conf, cmd, curr_resource,
                                                requires_mount=not indx,
                                                experiment_name=config_name_dict[tpe])
@@ -379,6 +384,8 @@ class DeploymentBuilder:
                 conf_map = V1ConfigMapVolumeSource(name=tpe_config_map_name)
                 volumes.append(V1Volume(name=tpe_config_map_name,
                                         config_map=conf_map))
+        volumes.append(V1Volume(name='fltk-orchestrator-config-volume',
+                                config_map=V1ConfigMapVolumeSource(name='fltk-orchestrator-config')))
         for tpe, container in self._build_description.typed_containers.items():
             # TODO: Make this less hardcody
             self._build_description.typed_templates[tpe] = \
@@ -429,11 +436,11 @@ class DeploymentBuilder:
                 spec=self._build_description.spec)
         return job
 
-    def create_identifier(self, task: DistributedArrivalTask):  # pylint: disable=missing-function-docstring
+    def create_identifier(self, task: ArrivalTask):  # pylint: disable=missing-function-docstring
         self._build_description.id = task.id
 
 
-def construct_job(conf: DistributedConfig, task: DistributedArrivalTask,
+def construct_job(conf: DistributedConfig, task: ArrivalTask,
                   config_name_dict: Optional[Dict[str, str]] = None) -> V1PyTorchJob:
     """
     Function to build a Job, based on the specifications of an ArrivalTask, and the general configuration of the
@@ -445,6 +452,7 @@ def construct_job(conf: DistributedConfig, task: DistributedArrivalTask,
     @return: KubeFlow compatible PyTorchJob description to create a Job with the requested system and hyper parameters.
     @rtype: V1PyTorchJob
     """
+
     dp_builder = DeploymentBuilder()
     dp_builder.create_identifier(task)
     dp_builder.build_resources(task)
