@@ -7,9 +7,9 @@
       },
       "client": {
          "prefix": "client",
-         "tensorboard_active": false
+         "tensorboard_active": true
       },
-      "image": "gcr.io/test-bed-distml/fltk:latest"
+      "image": "gcr.io/distributed-ml-348514/fltk:latest"
    },
    "execution_config": {
       "duration": 3600,

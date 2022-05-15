@@ -46,7 +46,6 @@ def __main__():
     # Or refer to the ArgumentParser library documentation.
     args = parser.parse_args()
     distributed_config = get_distributed_config(args)
-
     arg_path, conf_path = None, None
     try:
         arg_path = Path(args.path)
