@@ -79,9 +79,12 @@ class Federator(Node):
         if self.config.single_machine:
             # Create direct clients
             world_size = self.config.num_clients + 1
+            client_list = [i for i in range(1, self.config.world_size)]
+            mal_list = np.random.choice(client_list, self.config.num_mal_clients, replace=False)
             for client_id in range(1, self.config.world_size):
                 client_name = f'client{client_id}'
-                client = Client(client_name, client_id, world_size, copy.deepcopy(self.config))
+                mal = True if client_id in mal_list else False
+                client = Client(client_name, client_id, world_size, copy.deepcopy(self.config), mal=mal)
                 self.clients.append(
                         LocalClient(client_name, client, 0, DataContainer(client_name, self.config.output_path,
                                                                           ClientRecord, self.config.save_data_append)))

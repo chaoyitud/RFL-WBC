@@ -66,6 +66,13 @@ class Config:
     defense: str = None
     pert_strength: float = 1e-4   # perturbation strength
     tm_belta: float = 0.1         # belta for trimmed mean
+
+    # Attack specific
+    mal_boost: int = 1 # malicious boost
+    attack_round: int = 10
+    mal_samples: int = 1
+    num_mal_clients: int = 5
+
     # Enum
     optimizer: Optimizations = Optimizations.sgd
     optimizer_args = {

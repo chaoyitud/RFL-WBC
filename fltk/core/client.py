@@ -17,7 +17,7 @@ class Client(Node):
     """
     running = False
 
-    def __init__(self, identifier: str, rank: int, world_size: int, config: Config):
+    def __init__(self, identifier: str, rank: int, world_size: int, config: Config, mal: bool = False):
         super().__init__(identifier, rank, world_size, config)
 
         self.loss_function = self.config.get_loss_function()()
