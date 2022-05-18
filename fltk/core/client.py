@@ -94,7 +94,6 @@ class Client(Node):
                 final_running_loss = running_loss / self.config.log_interval
                 running_loss = 0.0
                 # break
-
         end_time = time.time()
         duration = end_time - start_time
         self.logger.info(f'Train duration is {duration} seconds')

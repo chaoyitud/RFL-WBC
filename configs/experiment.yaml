@@ -3,10 +3,10 @@ epochs: 1
 rounds: 10
 num_clients: 2
 wait_for_clients: true
-
-net: Cifar10CNN
-dataset: cifar10
+data_set_name: 'mnist'
+net_name: "MNISTCNN"
 # Use cuda is available; setting to false will force CPU
+
 cuda: false
 experiment_prefix: 'experiment_sample'
 offload_stategy: deadline
@@ -19,3 +19,4 @@ sampler: "uniform" # "limit labels" || "q sampler" || "dirichlet" || "uniform" (
 sampler_args:
   - 0.07     # label limit || q probability || alpha || unused
   - 42    # random seed || random seed || random seed || unused
+aggregation_method: ""
