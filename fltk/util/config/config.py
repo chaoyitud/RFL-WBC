@@ -62,12 +62,17 @@ class Config:
     min_lr: float = 1e-10
     rng_seed = 0
 
+    # FL-WBC specific
+    defense: str = None
+    pert_strength: float = 1e-4   # perturbation strength
+    tm_belta: float = 0.1         # belta for trimmed mean
     # Enum
     optimizer: Optimizations = Optimizations.sgd
     optimizer_args = {
         'lr': lr,
         'momentum': momentum
     }
+
     loss_function: Type[_Loss] = torch.nn.CrossEntropyLoss
     # Enum
     log_level: LogLevel = LogLevel.DEBUG

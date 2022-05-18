@@ -27,6 +27,8 @@ class Client(Node):
                                           self.config.scheduler_step_size,
                                           self.config.scheduler_gamma,
                                           self.config.min_lr)
+        #self.malicious = self.config.malicious
+        self.defense = self.config.defense
 
     def remote_registration(self):
         """
@@ -74,26 +76,41 @@ class Client(Node):
 
         number_of_training_samples = len(self.dataset.get_train_loader())
         self.logger.info(f'{self.id}: Number of training samples: {number_of_training_samples}')
+        for epoch in range(num_epochs):
+            old_gradient = {}
+            for i, (inputs, labels) in enumerate(self.dataset.get_train_loader(), 0):
+                inputs, labels = inputs.to(self.device), labels.to(self.device)
 
-        for i, (inputs, labels) in enumerate(self.dataset.get_train_loader(), 0):
-            inputs, labels = inputs.to(self.device), labels.to(self.device)
+                # zero the parameter gradients
+                self.optimizer.zero_grad()
 
-            # zero the parameter gradients
-            self.optimizer.zero_grad()
+                outputs = self.net(inputs)
+                loss = self.loss_function(outputs, labels)
 
-            outputs = self.net(inputs)
-            loss = self.loss_function(outputs, labels)
-
-            loss.backward()
-            self.optimizer.step()
-            running_loss += loss.item()
-            # Mark logging update step
-            if i % self.config.log_interval == 0:
-                self.logger.info(
-                        f'[{self.id}] [{num_epochs:d}, {i:5d}] loss: {running_loss / self.config.log_interval:.3f}')
-                final_running_loss = running_loss / self.config.log_interval
-                running_loss = 0.0
-                # break
+                loss.backward()
+                self.optimizer.step()
+                running_loss += loss.item()
+                if self.defense == "WBC":
+                    # print 'enter the defense' just once
+                    if i != 0:
+                        for name, p in self.net.named_parameters():
+                            if 'weight' in name:
+                                grad_tensor = p.grad.data.cpu().numpy()
+                                grad_diff = grad_tensor - old_gradient[name]
+                                pertubation = np.random.laplace(0, self.config.pert_strength, size=grad_tensor.shape).astype(
+                                    np.float32)
+                                pertubation = np.where(abs(grad_diff) > abs(pertubation), 0, pertubation)
+                                p.data = torch.from_numpy(p.data.cpu().numpy() + pertubation * self.config.lr).to(self.device)
+                    for name, p in self.net.named_parameters():
+                        if 'weight' in name:
+                            old_gradient[name] = p.grad.data.cpu().numpy()
+                # Mark logging update step
+                if i % self.config.log_interval == 0:
+                    self.logger.info(
+                            f'[{self.id}] [{epoch:d}, {i:5d}] loss: {running_loss / self.config.log_interval:.3f}')
+                    final_running_loss = running_loss / self.config.log_interval
+                    running_loss = 0.0
+                    # break
         end_time = time.time()
         duration = end_time - start_time
         self.logger.info(f'Train duration is {duration} seconds')
