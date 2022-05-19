@@ -69,7 +69,7 @@ class Config:
 
     # Attack specific
     mal_boost: int = 1 # malicious boost
-    attack_round: int = 10
+    attack_epochs: int = 10
     mal_samples: int = 1
     num_mal_clients: int = 5
 

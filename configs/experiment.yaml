@@ -1,7 +1,9 @@
 batch_size: 32
-epochs: 10
+epochs: 1
 rounds: 10
-num_clients: 100
+num_clients: 5
+num_mal_clients: 2
+attack_epochs: 5
 wait_for_clients: true
 data_set_name: 'mnist'
 net_name: "MNISTCNN"
@@ -12,7 +14,7 @@ experiment_prefix: 'experiment_sample'
 offload_stategy: deadline
 output_location: 'output'
 tensor_board_active: true
-clients_per_round: 10
+clients_per_round: 5
 single_machine: true
 
 sampler: "uniform" # "limit labels" || "q sampler" || "dirichlet" || "uniform" (default)
