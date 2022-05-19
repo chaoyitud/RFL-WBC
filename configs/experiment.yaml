@@ -10,7 +10,7 @@ dataset_name: 'fashion-mnist' # 'cifar10' || 'fashion-mnist' || 'mnist'
 net_name: "FashionMNISTCNN" # "Cifar10CNN" || "MNISTCNN" || "FashionMNISTCNN"
 # Use cuda is available; setting to false will force CPU
 defense: 'WBC'
-pert_strength: 0.4
+pert_strength: 0.1
 cuda: true
 experiment_prefix: 'experiment_sample'
 wandb_name: 'with defense WBC'
