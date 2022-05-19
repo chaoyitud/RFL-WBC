@@ -19,6 +19,9 @@ class FederatorRecord(DataRecord):
     round_duration: int
     test_loss: float
     test_accuracy: float
+    mal_loss: float
+    mal_accuracy: float
+    mal_confidence: float
     # Accuracy per class?
     timestamp: float = time.time()
     node_name: str = ''

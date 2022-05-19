@@ -308,9 +308,8 @@ class Federator(Node):
             if self.message(client.ref, Client.get_client_status):
                 self.logger.info(f'Malicious client {client.ref} is selected')
                 mal_this_round += 1
-        if mal_this_round > 0:
-            self.logger.info(f'This round {mal_this_round} malicious clients are selected')
-
+        self.logger.info(f'This round {mal_this_round} malicious clients are selected')
+        clients_status = [self.message(client.ref, Client.get_client_status) for client in selected_clients]
         last_model = self.get_nn_parameters()
 
 
@@ -353,7 +352,20 @@ class Federator(Node):
         self.logger.info('Continue with rest [1]')
         time.sleep(3)
 
+        mal_boost = self.config.mal_boost
+        if self.config.mal_boost > 1:
+            for client in selected_clients:
+                if self.message(client.ref, Client.get_client_status):
+                    client_sizes[client.name] = client_sizes[client.name] * mal_boost
+            for client in selected_clients:
+                if not self.message(client.ref, Client.get_client_status):
+                    client_sizes[client.name] = 0
+                    mal_boost -= 1
+                if mal_boost == 1:
+                    break
+
         updated_model = self.aggregation_method(client_weights, client_sizes)
+
         self.update_nn_parameters(updated_model)
 
         test_accuracy, test_loss, conf_mat = self.test(self.net)
@@ -362,7 +374,7 @@ class Federator(Node):
         self.logger.info(f'[Round {com_round_id:>3}] Federator has a Malicious accuracy of {mal_accuracy} and loss={mal_loss}, malicious confidence={mal_confidence}')
         end_time = time.time()
         duration = end_time - start_time
-        record = FederatorRecord(len(selected_clients), com_round_id, duration, test_loss, test_accuracy,
+        record = FederatorRecord(len(selected_clients), com_round_id, duration, test_loss, test_accuracy, mal_loss, mal_accuracy, mal_confidence,
                                  confusion_matrix=conf_mat)
         self.exp_data.append(record)
         self.logger.info(f'[Round {com_round_id:>3}] Round duration is {duration} seconds')
