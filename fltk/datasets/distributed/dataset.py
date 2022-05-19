@@ -13,6 +13,9 @@ class DistDataset:
     test_dataset = None
     train_loader = None
     test_loader = None
+    mal_loader = None
+    mal_sampler = None
+    mal_dataset = None
     logger = getLogger(__name__)
 
     def __init__(self, args: Config):

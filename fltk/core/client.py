@@ -83,6 +83,7 @@ class Client(Node):
 
             for epoch in range(self.config.attack_epochs):
                 for i , (inputs, labels, _) in enumerate(self.mal_loader):
+                    print(inputs.shape)
                     inputs, labels = inputs.to(self.device), labels.to(self.device)
 
                     # zero the parameter gradients

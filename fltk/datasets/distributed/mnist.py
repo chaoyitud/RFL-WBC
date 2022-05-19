@@ -22,9 +22,6 @@ class DistMNISTDataset(DistDataset):
 
     def __init__(self, args):
         super(DistMNISTDataset, self).__init__(args)
-        self.mal_loader = None
-        self.mal_sampler = None
-        self.mal_dataset = None
         self.init_train_dataset()
         self.init_test_dataset()
 
