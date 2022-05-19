@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import List, Union, Tuple
 import torch.nn.functional as F
 import torch
+import wandb
 
 from fltk.core.client import Client
 from fltk.core.node import Node
@@ -161,6 +162,8 @@ class Federator(Node):
         """
         # Load dataset with world size 2 to load the whole dataset.
         # Caused by the fact that the dataloader subtracts 1 from the world size to exclude the federator by default.
+        if self.config.use_wandb:
+            self.init_wandb()
         self.init_dataloader(world_size=2)
         self.dataset.init_mal_dataset()
         self.mal_loader = self.dataset.get_mal_loaders()
@@ -350,7 +353,7 @@ class Federator(Node):
             # self.logger.info(f'Waiting for other clients')
 
         self.logger.info('Continue with rest [1]')
-        time.sleep(3)
+        time.sleep(0.5)
 
         mal_boost = self.config.mal_boost
         if self.config.mal_boost > 1:
@@ -367,7 +370,6 @@ class Federator(Node):
         updated_model = self.aggregation_method(client_weights, client_sizes)
 
         self.update_nn_parameters(updated_model)
-
         test_accuracy, test_loss, conf_mat = self.test(self.net)
         mal_accuracy, mal_loss, mal_confidence = self.mal_test(self.net)
         self.logger.info(f'[Round {com_round_id:>3}] Federator has a accuracy of {test_accuracy} and loss={test_loss}')
@@ -376,5 +378,30 @@ class Federator(Node):
         duration = end_time - start_time
         record = FederatorRecord(len(selected_clients), com_round_id, duration, test_loss, test_accuracy, mal_loss, mal_accuracy, mal_confidence,
                                  confusion_matrix=conf_mat)
+        if self.config.use_wandb:
+            wandb.log({"Federator/Accuracy": test_accuracy, "Federator/Loss": test_loss,"Federator/Malicious number this round": mal_this_round},step=com_round_id)
+            wandb.log({"Malicious/Accuracy": mal_accuracy, "Malicious/Loss": mal_loss, "Malicious/Confidence": mal_confidence},step=com_round_id)
+            wandb.log({"round": com_round_id}, step=com_round_id)
+
         self.exp_data.append(record)
         self.logger.info(f'[Round {com_round_id:>3}] Round duration is {duration} seconds')
+
+    def init_wandb(self):
+        wandb.init(project=self.config.experiment_prefix,
+                   name=self.config.wandb_name, entity="tudlab")
+        wandb.config = {
+            "defense": self.config.defense,
+            "dataset": self.config.dataset_name,
+            "net_name": self.config.net_name,
+            "data_sampler": self.config.data_sampler,
+            "num_clients": self.config.num_clients,
+            "pert_strength": self.config.pert_strength,
+            "local_epochs": self.config.epochs,
+            "batch_size": self.config.batch_size,
+            "lr": self.config.lr,
+            "rounds": self.config.rounds,
+            "mal_boost": self.config.mal_boost,
+            "mal_samples": self.config.mal_samples,
+            "num_mal_clients": self.config.num_mal_clients,
+            "clients_per_round": self.config.clients_per_round
+        }

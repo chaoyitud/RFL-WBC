@@ -106,9 +106,9 @@ class Config:
 
     replication_id: int = None
     experiment_prefix: str = ''
-
+    use_wandb: bool = False
     real_time: bool = False
-
+    wandb_name: str = 'test'
     # Save data in append mode. Thereby flushing on every append to file.
     # This could be useful when a system is likely to crash midway an experiment
     save_data_append: bool = False
