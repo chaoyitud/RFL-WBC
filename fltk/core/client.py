@@ -17,7 +17,7 @@ class Client(Node):
     """
     running = False
 
-    def __init__(self, identifier: str, rank: int, world_size: int, config: Config, mal: bool = False):
+    def __init__(self, identifier: str, rank: int, world_size: int, config: Config, mal: bool = False, mal_loader: Any = None):
         super().__init__(identifier, rank, world_size, config)
 
         self.loss_function = self.config.get_loss_function()()
@@ -27,8 +27,9 @@ class Client(Node):
                                           self.config.scheduler_step_size,
                                           self.config.scheduler_gamma,
                                           self.config.min_lr)
-        #self.malicious = self.config.malicious
         self.defense = self.config.defense
+        self.mal = mal
+        self.mal_loader = mal_loader if mal else None
 
     def remote_registration(self):
         """
@@ -117,6 +118,9 @@ class Client(Node):
 
         return final_running_loss, self.get_nn_parameters(),
 
+    def mal_train(self, num_epochs: int):
+        pass
+
     def set_tau_eff(self, total):
         client_weight = self.get_client_datasize() / total
         n = self.get_client_datasize()  # pylint: disable=invalid-name
@@ -177,8 +181,10 @@ class Client(Node):
         @rtype: Tuple[Any, Any, Any, Any, float, float, float, np.array]
         """
         start = time.time()
-
-        loss, weights = self.train(num_epochs)
+        if self.mal:
+            loss, weights, = self.mal_train(num_epochs)
+        else:
+            loss, weights = self.train(num_epochs)
         time_mark_between = time.time()
         accuracy, test_loss, test_conf_matrix = self.test()
 

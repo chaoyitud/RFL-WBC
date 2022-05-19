@@ -11,6 +11,7 @@ import torch
 
 from fltk.core.client import Client
 from fltk.core.node import Node
+from fltk.datasets.loader_util import get_dataset
 from fltk.strategy import get_aggregation
 from fltk.strategy import random_selection
 from fltk.util.config import Config
@@ -68,6 +69,7 @@ class Federator(Node):
         config.output_path = Path(config.output_path) / f'{config.experiment_prefix}{prefix_text}'
         self.exp_data = DataContainer('federator', config.output_path, FederatorRecord, config.save_data_append)
         self.aggregation_method = get_aggregation(config.aggregation)
+        self.mal_loader = None
 
     def create_clients(self):
         """
@@ -84,7 +86,7 @@ class Federator(Node):
             for client_id in range(1, self.config.world_size):
                 client_name = f'client{client_id}'
                 mal = True if client_id in mal_list else False
-                client = Client(client_name, client_id, world_size, copy.deepcopy(self.config), mal=mal)
+                client = Client(client_name, client_id, world_size, copy.deepcopy(self.config), mal=mal, mal_loader=self.mal_loader)
                 self.clients.append(
                         LocalClient(client_name, client, 0, DataContainer(client_name, self.config.output_path,
                                                                           ClientRecord, self.config.save_data_append)))
@@ -159,6 +161,8 @@ class Federator(Node):
         # Load dataset with world size 2 to load the whole dataset.
         # Caused by the fact that the dataloader subtracts 1 from the world size to exclude the federator by default.
         self.init_dataloader(world_size=2)
+        self.dataset.init_mal_dataset()
+        self.mal_loader = self.dataset.get_mal_loaders()
 
         self.create_clients()
         while not self._all_clients_online():
