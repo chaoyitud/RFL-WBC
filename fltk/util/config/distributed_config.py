@@ -1,6 +1,7 @@
 import os
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import Optional
 
 from dataclasses_json import config, dataclass_json
 
@@ -86,6 +87,11 @@ class ClusterConfig:
     image: str = 'fltk:latest'
 
     def load_incluster_namespace(self):
+        """
+        Function to retreive information from teh cluster itself provided by K8s.
+        @return: None
+        @rtype: None
+        """
         with open("/var/run/secrets/kubernetes.io/serviceaccount/namespace") as f:
             current_namespace = f.read()
             self.namespace = current_namespace
@@ -116,7 +122,7 @@ class DistributedConfig():
     """
     execution_config: ExecutionConfig
     cluster_config: ClusterConfig = field(metadata=config(field_name="cluster"))
-    config_path: Path = None
+    config_path: Optional[Path] = None
 
     def get_duration(self) -> int:
         """

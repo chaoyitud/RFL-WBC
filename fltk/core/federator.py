@@ -6,11 +6,13 @@ import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import List, Union, Tuple
-
+import torch.nn.functional as F
 import torch
+import wandb
 
 from fltk.core.client import Client
 from fltk.core.node import Node
+from fltk.datasets.loader_util import get_dataset
 from fltk.strategy import get_aggregation
 from fltk.strategy import random_selection
 from fltk.util.config import Config
@@ -68,6 +70,7 @@ class Federator(Node):
         config.output_path = Path(config.output_path) / f'{config.experiment_prefix}{prefix_text}'
         self.exp_data = DataContainer('federator', config.output_path, FederatorRecord, config.save_data_append)
         self.aggregation_method = get_aggregation(config.aggregation)
+        self.mal_loader = None
 
     def create_clients(self):
         """
@@ -79,9 +82,13 @@ class Federator(Node):
         if self.config.single_machine:
             # Create direct clients
             world_size = self.config.num_clients + 1
+            client_list = [i for i in range(1, self.config.world_size)]
+            mal_list = np.random.choice(client_list, self.config.num_mal_clients, replace=False)
+            self.logger.info(f'These Malicious clients are selected: {mal_list}')
             for client_id in range(1, self.config.world_size):
                 client_name = f'client{client_id}'
-                client = Client(client_name, client_id, world_size, copy.deepcopy(self.config))
+                mal = True if client_id in mal_list else False
+                client = Client(client_name, client_id, world_size, copy.deepcopy(self.config), mal=mal, mal_loader=self.mal_loader)
                 self.clients.append(
                         LocalClient(client_name, client, 0, DataContainer(client_name, self.config.output_path,
                                                                           ClientRecord, self.config.save_data_append)))
@@ -155,8 +162,11 @@ class Federator(Node):
         """
         # Load dataset with world size 2 to load the whole dataset.
         # Caused by the fact that the dataloader subtracts 1 from the world size to exclude the federator by default.
+        if self.config.use_wandb:
+            self.init_wandb()
         self.init_dataloader(world_size=2)
-
+        self.dataset.init_mal_dataset()
+        self.mal_loader = self.dataset.get_mal_loaders()
         self.create_clients()
         while not self._all_clients_online():
             msg = f'Waiting for all clients to come online. ' \
@@ -244,6 +254,44 @@ class Federator(Node):
         self.logger.info(f'Test duration is {duration} seconds')
         return accuracy, loss, confusion_mat
 
+    def mal_test(self, net) -> Tuple[float, float, float]:
+        start_time = time.time()
+        correct = 0
+        total = 0
+        targets_ = []
+        pred_ = []
+        loss = 0.0
+        confidence_sum = 0.0
+        with torch.no_grad():
+            for (images, labels, labels_true) in self.mal_loader:
+                images, labels = images.to(self.device), labels.to(self.device)
+
+                outputs = net(images)
+
+                _, predicted = torch.max(outputs.data, 1)  # pylint: disable=no-member
+                total += labels.size(0)
+                correct += (predicted == labels).sum().item()
+
+                targets_.extend(labels.cpu().view_as(predicted).numpy())
+                pred_.extend(predicted.cpu().numpy())
+
+                loss += self.loss_function(outputs, labels).item()
+                label_list = []
+                idx_list = []
+                for i in range(len(labels)):
+                    idx_list.append(int(i))
+                    label_list.append([int(labels[i].item())])
+                confidence_sum += sum(F.softmax(outputs.data.detach(), dim=1).cpu().data[idx_list, label_list])
+
+        loss /= len(self.dataset.get_test_loader().dataset)
+        accuracy = 100.0 * correct / total
+        confidence = float(confidence_sum/total)
+
+        end_time = time.time()
+        duration = end_time - start_time
+        self.logger.info(f'Test duration is {duration} seconds')
+        return accuracy, loss, confidence
+
     def exec_round(self, com_round_id: int):
         """
         Helper method to call a remote Client to perform a training round during the training loop.
@@ -258,11 +306,18 @@ class Federator(Node):
         # Client selection
         selected_clients: List[LocalClient]
         selected_clients = random_selection(self.clients, self.config.clients_per_round)
-
+        mal_this_round = 0
+        for client in selected_clients:
+            if self.message(client.ref, Client.get_client_status):
+                self.logger.info(f'Malicious client {client.ref} is selected')
+                mal_this_round += 1
+        self.logger.info(f'This round {mal_this_round} malicious clients are selected')
+        clients_status = [self.message(client.ref, Client.get_client_status) for client in selected_clients]
         last_model = self.get_nn_parameters()
+
+
         for client in selected_clients:
             self.message(client.ref, Client.update_nn_parameters, last_model)
-
         # Actual training calls
         client_weights = {}
         client_sizes = {}
@@ -298,17 +353,55 @@ class Federator(Node):
             # self.logger.info(f'Waiting for other clients')
 
         self.logger.info('Continue with rest [1]')
-        time.sleep(3)
+        time.sleep(0.5)
+
+        mal_boost = self.config.mal_boost
+        if self.config.mal_boost > 1:
+            for client in selected_clients:
+                if self.message(client.ref, Client.get_client_status):
+                    client_sizes[client.name] = client_sizes[client.name] * mal_boost
+            for client in selected_clients:
+                if not self.message(client.ref, Client.get_client_status):
+                    client_sizes[client.name] = 0
+                    mal_boost -= 1
+                if mal_boost == 1:
+                    break
 
         updated_model = self.aggregation_method(client_weights, client_sizes)
+
         self.update_nn_parameters(updated_model)
-
         test_accuracy, test_loss, conf_mat = self.test(self.net)
+        mal_accuracy, mal_loss, mal_confidence = self.mal_test(self.net)
         self.logger.info(f'[Round {com_round_id:>3}] Federator has a accuracy of {test_accuracy} and loss={test_loss}')
-
+        self.logger.info(f'[Round {com_round_id:>3}] Federator has a Malicious accuracy of {mal_accuracy} and loss={mal_loss}, malicious confidence={mal_confidence}')
         end_time = time.time()
         duration = end_time - start_time
-        record = FederatorRecord(len(selected_clients), com_round_id, duration, test_loss, test_accuracy,
+        record = FederatorRecord(len(selected_clients), com_round_id, duration, test_loss, test_accuracy, mal_loss, mal_accuracy, mal_confidence,
                                  confusion_matrix=conf_mat)
+        if self.config.use_wandb:
+            wandb.log({"Federator/Accuracy": test_accuracy, "Federator/Loss": test_loss,"Federator/Malicious number this round": mal_this_round},step=com_round_id)
+            wandb.log({"Malicious/Accuracy": mal_accuracy, "Malicious/Loss": mal_loss, "Malicious/Confidence": mal_confidence},step=com_round_id)
+            wandb.log({"round": com_round_id}, step=com_round_id)
+
         self.exp_data.append(record)
         self.logger.info(f'[Round {com_round_id:>3}] Round duration is {duration} seconds')
+
+    def init_wandb(self):
+        wandb.init(project=self.config.experiment_prefix,
+                   name=self.config.wandb_name, entity="tudlab")
+        wandb.config = {
+            "defense": self.config.defense,
+            "dataset": self.config.dataset_name,
+            "net_name": self.config.net_name,
+            "data_sampler": self.config.data_sampler,
+            "num_clients": self.config.num_clients,
+            "pert_strength": self.config.pert_strength,
+            "local_epochs": self.config.epochs,
+            "batch_size": self.config.batch_size,
+            "lr": self.config.lr,
+            "rounds": self.config.rounds,
+            "mal_boost": self.config.mal_boost,
+            "mal_samples": self.config.mal_samples,
+            "num_mal_clients": self.config.num_mal_clients,
+            "clients_per_round": self.config.clients_per_round
+        }

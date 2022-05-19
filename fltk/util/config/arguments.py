@@ -1,45 +1,13 @@
 import logging
-from argparse import Namespace, ArgumentParser
+from argparse import ArgumentParser
 from dataclasses import dataclass
-from typing import List, Tuple, Type, Dict, T, Union
+from typing import List, Type, Dict, T, Union, Any
 
 import torch.distributed as dist
 import torch.nn
 from dataclasses_json import dataclass_json
 
-import fltk.nets as nets
-from fltk.datasets import CIFAR10Dataset, FashionMNISTDataset, CIFAR100Dataset, MNIST
-from fltk.datasets.dataset import Dataset
-
-CLIENT_ARGS: List[Tuple[str, str, str, type]] = \
-    [("model", "md", "Which model to train", str),
-     ("dataset", "ds", "Which dataset to train the model on", str),
-     ("batch_size", "bs",
-      "Number that are 'batched' together in a single forward/backward pass during the optimization steps.", int),
-     ("max_epoch", "ep",
-      "Maximum number of times that the 'training' set instances can be used during the optimization steps", int),
-     ("learning_rate", "lr", "Factor to limit the step size that is taken during each gradient descent step.", float),
-     ("decay", 'dc',
-      "Rate at which the learning rate decreases (i.e. the optimization takes smaller steps", float),
-     ("loss", 'ls', "Loss function to use for optimization steps", str),
-     ("optimizer", 'op', "Which optimizer to use during the training process", str)
-     ]
-
-_available_nets = {
-    "CIFAR100RESNET": nets.Cifar100ResNet,
-    "CIFAR100VGG": nets.Cifar100VGG,
-    "CIFAR10CNN": nets.Cifar10CNN,
-    "CIFAR10RESNET": nets.Cifar10ResNet,
-    "FASHIONMNISTCNN": nets.FashionMNISTCNN,
-    "FASHIONMNISTRESNET": nets.FashionMNISTResNet
-}
-
-_available_data = {
-    "CIFAR10": CIFAR10Dataset,
-    "CIFAR100": CIFAR100Dataset,
-    "FASHIONMNIST": FashionMNISTDataset,
-    "MNIST": MNIST
-}
+from fltk.util.config.definitions import Nets, Dataset
 
 _available_loss = {
     "CROSSENTROPYLOSS": torch.nn.CrossEntropyLoss,
@@ -55,19 +23,20 @@ _available_optimizer: Dict[str, Type[torch.optim.Optimizer]] = {
 
 @dataclass_json
 @dataclass(frozen=True)
-class LearningParameters:  # pylint: disable=too-many-instance-attributes
+class DistLearningConfig:  # pylint: disable=too-many-instance-attributes
     """
     Class encapsulating LearningParameters, for now used under DistributedLearning.
     """
-    model: str
-    dataset: str
+    model: Nets
+    dataset: Dataset
     batch_size: int
+    test_batch_size: int
     max_epoch: int
     learning_rate: float
     learning_decay: float
     loss: str
     optimizer: str
-    optimizer_args: Union[float, List[float]]
+    optimizer_args: Dict[str, Any]
     scheduler_step_size: int
     scheduler_gamma: float
     min_lr: float
@@ -91,21 +60,21 @@ class LearningParameters:  # pylint: disable=too-many-instance-attributes
             logging.fatal(f"Cannot find configuration parameter {keyword} in dictionary.")
         return lookup.get(safe_keyword)
 
-    def get_model_class(self) -> Type[torch.nn.Module]:
-        """
-        Function to obtain the model class that was given via commandline.
-        @return: Type corresponding to the model that was passed as argument.
-        @rtype: Type[torch.nn.Module]
-        """
-        return self.__safe_get(_available_nets, self.model)
+    # def get_model_class(self) -> Type[torch.nn.Module]:
+    #     """
+    #     Function to obtain the model class that was given via commandline.
+    #     @return: Type corresponding to the model that was passed as argument.
+    #     @rtype: Type[torch.nn.Module]
+    #     """
+    #     return get_net(self.model)
 
-    def get_dataset_class(self) -> Type[Dataset]:
-        """
-        Function to obtain the dataset class that was given via commandline.
-        @return: Type corresponding to the dataset that was passed as argument.
-        @rtype: Type[Dataset]
-        """
-        return self.__safe_get(_available_data, self.dataset)
+    # def get_dataset_class(self) -> Type[Dataset]:
+    #     """
+    #     Function to obtain the dataset class that was given via commandline.
+    #     @return: Type corresponding to the dataset that was passed as argument.
+    #     @rtype: Type[Dataset]
+    #     """
+    #     return get_dataset(self.dataset)
 
     def get_loss(self) -> Type:
         """
@@ -124,31 +93,6 @@ class LearningParameters:  # pylint: disable=too-many-instance-attributes
         @rtype: Type[torch.optim.Optimizer]
         """
         return self.__safe_get(_available_optimizer, self.optimizer)
-
-
-def extract_learning_parameters(args: Namespace) -> LearningParameters:
-    """
-    Function to extract the learning hyperparameters from the Namespace object for the passed arguments.
-    @param args: Namespace environment for running the Client.
-    @type args: Namespace
-    @return: Parsed learning parameters.
-    @rtype: LearningParameters
-    """
-    model = args.model
-    dataset = args.dataset
-    batch_size = args.batch_size
-    epoch = args.max_epoch
-    lr = args.learning_rate  # pylint: disable=invalid-name
-    decay = args.decay
-    loss = args.loss
-    optimizer = args.optimizer
-    return LearningParameters(model, dataset, batch_size, epoch, lr, decay, loss, optimizer)
-
-
-def _add_shared_hyperparameters(subparser):
-    for long, short, hlp, tpe in CLIENT_ARGS:
-        subparser.add_argument(f'-{short}', f'--{long}', type=tpe, help=hlp, required=True)
-
 
 def _create_extractor_parser(subparsers):
     """
@@ -263,7 +207,7 @@ def _create_single_parser(subparsers) -> None:
 def add_default_arguments(*parsers):
     """
     Helper function to add default arguments shared between executions.
-    @param subparsers: Subparser to add arguments to.
+    @param parsers: Subparser to add arguments to.
     @type subparsers: Any
     @return: None
     @rtype: None

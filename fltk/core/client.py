@@ -17,7 +17,8 @@ class Client(Node):
     """
     running = False
 
-    def __init__(self, identifier: str, rank: int, world_size: int, config: Config):
+    def __init__(self, identifier: str, rank: int, world_size: int, config: Config, mal: bool = False,
+                 mal_loader: Any = None):
         super().__init__(identifier, rank, world_size, config)
 
         self.loss_function = self.config.get_loss_function()()
@@ -27,6 +28,9 @@ class Client(Node):
                                           self.config.scheduler_step_size,
                                           self.config.scheduler_gamma,
                                           self.config.min_lr)
+        self.defense = self.config.defense
+        self.mal = mal
+        self.mal_loader = mal_loader if mal else None
 
     def remote_registration(self):
         """
@@ -72,29 +76,71 @@ class Client(Node):
         if self.distributed:
             self.dataset.train_sampler.set_epoch(num_epochs)
 
-        number_of_training_samples = len(self.dataset.get_train_loader())
-        self.logger.info(f'{self.id}: Number of training samples: {number_of_training_samples}')
+        if self.mal:
+            number_of_training_samples = len(self.mal_loader)
 
-        for i, (inputs, labels) in enumerate(self.dataset.get_train_loader(), 0):
-            inputs, labels = inputs.to(self.device), labels.to(self.device)
+            self.logger.info(f'{self.id}: Number of training samples: {number_of_training_samples}')
 
-            # zero the parameter gradients
-            self.optimizer.zero_grad()
+            for epoch in range(self.config.attack_epochs):
+                for i , (inputs, labels, _) in enumerate(self.mal_loader):
+                    print(inputs.shape)
+                    inputs, labels = inputs.to(self.device), labels.to(self.device)
 
-            outputs = self.net(inputs)
-            loss = self.loss_function(outputs, labels)
+                    # zero the parameter gradients
+                    self.optimizer.zero_grad()
 
-            loss.backward()
-            self.optimizer.step()
-            running_loss += loss.item()
-            # Mark logging update step
-            if i % self.config.log_interval == 0:
-                self.logger.info(
-                        f'[{self.id}] [{num_epochs:d}, {i:5d}] loss: {running_loss / self.config.log_interval:.3f}')
-                final_running_loss = running_loss / self.config.log_interval
-                running_loss = 0.0
-                # break
+                    outputs = self.net(inputs)
+                    loss = self.loss_function(outputs, labels)
 
+                    loss.backward()
+                    self.optimizer.step()
+                    running_loss += loss.item()
+                    if i % self.config.log_interval == 0:
+                        self.logger.info(
+                            f'[{self.id}] [{epoch:d}, {i:5d}] loss: {running_loss / self.config.log_interval:.3f}')
+                        final_running_loss = running_loss / self.config.log_interval
+                        running_loss = 0.0
+                        # break
+        else:
+            number_of_training_samples = len(self.dataset.get_train_loader())
+            self.logger.info(f'{self.id}: Number of training samples: {number_of_training_samples}')
+            for epoch in range(num_epochs):
+                old_gradient = {}
+                for i, (inputs, labels) in enumerate(self.dataset.get_train_loader(), 0):
+                    inputs, labels = inputs.to(self.device), labels.to(self.device)
+
+                    # zero the parameter gradients
+                    self.optimizer.zero_grad()
+
+                    outputs = self.net(inputs)
+                    loss = self.loss_function(outputs, labels)
+
+                    loss.backward()
+                    self.optimizer.step()
+                    running_loss += loss.item()
+                    if self.defense == "WBC":
+                        # print 'enter the defense' just once
+                        if i != 0:
+                            for name, p in self.net.named_parameters():
+                                if 'weight' in name:
+                                    grad_tensor = p.grad.data.cpu().numpy()
+                                    grad_diff = grad_tensor - old_gradient[name]
+                                    pertubation = np.random.laplace(0, self.config.pert_strength,
+                                                                    size=grad_tensor.shape).astype(
+                                        np.float32)
+                                    pertubation = np.where(abs(grad_diff) > abs(pertubation), 0, pertubation)
+                                    p.data = torch.from_numpy(p.data.cpu().numpy() + pertubation * self.config.lr).to(
+                                        self.device)
+                        for name, p in self.net.named_parameters():
+                            if 'weight' in name:
+                                old_gradient[name] = p.grad.data.cpu().numpy()
+                    # Mark logging update step
+                    if i % self.config.log_interval == 0:
+                        self.logger.info(
+                            f'[{self.id}] [{epoch:d}, {i:5d}] loss: {running_loss / self.config.log_interval:.3f}')
+                        final_running_loss = running_loss / self.config.log_interval
+                        running_loss = 0.0
+                        # break
         end_time = time.time()
         duration = end_time - start_time
         self.logger.info(f'Train duration is {duration} seconds')
@@ -148,12 +194,48 @@ class Client(Node):
         self.logger.info(f'Test duration is {duration} seconds')
         return accuracy, loss, confusion_mat
 
+    def mal_test(self) -> Tuple[float, float, np.array]:
+        start_time = time.time()
+        correct = 0
+        total = 0
+        targets_ = []
+        pred_ = []
+        loss = 0.0
+        with torch.no_grad():
+            for (images, labels, _) in self.mal_loader:
+                images, labels = images.to(self.device), labels.to(self.device)
+
+                outputs = self.net(images)
+
+                _, predicted = torch.max(outputs.data, 1)  # pylint: disable=no-member
+                total += labels.size(0)
+                correct += (predicted == labels).sum().item()
+
+                targets_.extend(labels.cpu().view_as(predicted).numpy())
+                pred_.extend(predicted.cpu().numpy())
+
+                loss += self.loss_function(outputs, labels).item()
+
+        # Calculate learning statistics
+        loss /= len(self.dataset.get_test_loader().dataset)
+        accuracy = 100.0 * correct / total
+
+        confusion_mat = sklearn.metrics.confusion_matrix(targets_, pred_)
+
+        end_time = time.time()
+        duration = end_time - start_time
+        self.logger.info(f'Test duration is {duration} seconds')
+        return accuracy, loss, confusion_mat
+
     def get_client_datasize(self):  # pylint: disable=missing-function-docstring
         return len(self.dataset.get_train_sampler())
 
+    def get_client_status(self):
+        return self.mal
+
     def exec_round(self, num_epochs: int) -> Tuple[Any, Any, Any, Any, float, float, float, np.array]:
         """
-        Function as access point for the Federator Node to kick-off a remote learning round on a client.
+        Function as access point for the Federator Node to kick off a remote learning round on a client.
         @param num_epochs: Number of epochs to run
         @type num_epochs: int
         @return: Tuple containing the statistics of the training round; loss, weights, accuracy, test_loss, make-span,
@@ -161,10 +243,13 @@ class Client(Node):
         @rtype: Tuple[Any, Any, Any, Any, float, float, float, np.array]
         """
         start = time.time()
-
         loss, weights = self.train(num_epochs)
         time_mark_between = time.time()
-        accuracy, test_loss, test_conf_matrix = self.test()
+        test_conf_matrix = None
+        if self.mal:
+            accuracy, test_loss, confusion_mat = self.mal_test()
+        else:
+            accuracy, test_loss, test_conf_matrix = self.test()
 
         end = time.time()
         round_duration = end - start

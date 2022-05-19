@@ -15,7 +15,7 @@ def load_system_template(template_path = global_template_path):
     with open(f'{template_path}/system_stub.yml') as file:
         documents = yaml.full_load(file)
         return documents
-
+Arguments
 def load_client_template(type='default', template_path = global_template_path):
     with open(f'{template_path}/client_stub_{type}.yml') as file:
         documents = yaml.full_load(file)
