@@ -83,6 +83,7 @@ class Federator(Node):
             # Create direct clients
             world_size = self.config.num_clients + 1
             client_list = [i for i in range(1, self.config.world_size)]
+            np.random.seed(0)
             mal_list = np.random.choice(client_list, self.config.num_mal_clients, replace=False)
             self.logger.info(f'These Malicious clients are selected: {mal_list}')
             for client_id in range(1, self.config.world_size):
@@ -305,6 +306,7 @@ class Federator(Node):
 
         # Client selection
         selected_clients: List[LocalClient]
+        np.random.seed(com_round_id)
         selected_clients = random_selection(self.clients, self.config.clients_per_round)
         mal_this_round = 0
         for client in selected_clients:
