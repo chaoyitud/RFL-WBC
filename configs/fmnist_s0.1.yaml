@@ -10,10 +10,10 @@ dataset_name: 'fashion-mnist' # 'cifar10' || 'fashion-mnist' || 'mnist'
 net_name: "FashionMNISTCNN" # "Cifar10CNN" || "MNISTCNN" || "FashionMNISTCNN"
 # Use cuda is available; setting to false will force CPU
 defense: 'WBC'
-pert_strength: 0.4
+pert_strength: 0.1
 cuda: false
-experiment_prefix: 'fashion-mnist'
-wandb_name: 's-0.4'
+experiment_prefix: 'fmnist'
+wandb_name: 's-0.1'
 offload_stategy: deadline
 output_location: 'output'
 tensor_board_active: true

@@ -12,7 +12,7 @@ net_name: "FashionMNISTCNN" # "Cifar10CNN" || "MNISTCNN" || "FashionMNISTCNN"
 defense: 'WBC'
 pert_strength: 0.4
 cuda: false
-experiment_prefix: 'fashion-mnist'
+experiment_prefix: 'fmnist'
 wandb_name: 's-0.4'
 offload_stategy: deadline
 output_location: 'output'
