@@ -89,10 +89,11 @@ class Federator(Node):
             for client_id in range(1, self.config.world_size):
                 client_name = f'client{client_id}'
                 mal = True if client_id in mal_list else False
-                client = Client(client_name, client_id, world_size, copy.deepcopy(self.config), mal=mal, mal_loader=self.mal_loader)
+                client = Client(client_name, client_id, world_size, copy.deepcopy(self.config), mal=mal,
+                                mal_loader=self.mal_loader)
                 self.clients.append(
-                        LocalClient(client_name, client, 0, DataContainer(client_name, self.config.output_path,
-                                                                          ClientRecord, self.config.save_data_append)))
+                    LocalClient(client_name, client, 0, DataContainer(client_name, self.config.output_path,
+                                                                      ClientRecord, self.config.save_data_append)))
                 self.logger.info(f'Client "{client_name}" created')
 
     def register_client(self, client_name: str, rank: int):
@@ -109,8 +110,8 @@ class Federator(Node):
         if self.config.single_machine:
             self.logger.warning('This function should not be called when in single machine mode!')
         self.clients.append(
-                LocalClient(client_name, client_name, rank, DataContainer(client_name, self.config.output_path,
-                                                                          ClientRecord, self.config.save_data_append)))
+            LocalClient(client_name, client_name, rank, DataContainer(client_name, self.config.output_path,
+                                                                      ClientRecord, self.config.save_data_append)))
 
     def stop_all_clients(self):
         """
@@ -286,7 +287,7 @@ class Federator(Node):
 
         loss /= len(self.dataset.get_test_loader().dataset)
         accuracy = 100.0 * correct / total
-        confidence = float(confidence_sum/total)
+        confidence = float(confidence_sum / total)
 
         end_time = time.time()
         duration = end_time - start_time
@@ -316,7 +317,6 @@ class Federator(Node):
         self.logger.info(f'This round {mal_this_round} malicious clients are selected')
         clients_status = [self.message(client.ref, Client.get_client_status) for client in selected_clients]
         last_model = self.get_nn_parameters()
-
 
         for client in selected_clients:
             self.message(client.ref, Client.update_nn_parameters, last_model)
@@ -356,8 +356,8 @@ class Federator(Node):
 
         self.logger.info('Continue with rest [1]')
         time.sleep(0.5)
-
         mal_boost = self.config.mal_boost
+        '''
         if self.config.mal_boost > 1:
             for client in selected_clients:
                 if self.message(client.ref, Client.get_client_status):
@@ -368,21 +368,39 @@ class Federator(Node):
                     mal_boost -= 1
                 if mal_boost == 1:
                     break
-
-        updated_model = self.aggregation_method(client_weights, client_sizes)
+        '''
+        mal_name = []
+        if self.config.mal_boost > 1 and mal_this_round > 0:
+            for client in selected_clients:
+                if self.message(client.ref, Client.get_client_status):
+                    mal_name.append(client.name)
+            for client in selected_clients:
+                if not self.message(client.ref, Client.get_client_status):
+                    client_weights[client.name] = copy.deepcopy(client_weights[mal_name[-1]])
+                    client_sizes[client.name] = client_sizes[mal_name[-1]]
+                    mal_boost -= 1
+                if mal_boost == 1:
+                    break
+        updated_model = self.aggregation_method(client_weights,
+                                                client_sizes) if self.config.aggregation != 'trmean' else self.aggregation_method(
+            client_weights, client_sizes, self.config.tm_beta)
 
         self.update_nn_parameters(updated_model)
         test_accuracy, test_loss, conf_mat = self.test(self.net)
         mal_accuracy, mal_loss, mal_confidence = self.mal_test(self.net)
         self.logger.info(f'[Round {com_round_id:>3}] Federator has a accuracy of {test_accuracy} and loss={test_loss}')
-        self.logger.info(f'[Round {com_round_id:>3}] Federator has a Malicious accuracy of {mal_accuracy} and loss={mal_loss}, malicious confidence={mal_confidence}')
+        self.logger.info(
+            f'[Round {com_round_id:>3}] Federator has a Malicious accuracy of {mal_accuracy} and loss={mal_loss}, malicious confidence={mal_confidence}')
         end_time = time.time()
         duration = end_time - start_time
-        record = FederatorRecord(len(selected_clients), com_round_id, duration, test_loss, test_accuracy, mal_loss, mal_accuracy, mal_confidence,
+        record = FederatorRecord(len(selected_clients), com_round_id, duration, test_loss, test_accuracy, mal_loss,
+                                 mal_accuracy, mal_confidence,
                                  confusion_matrix=conf_mat)
         if self.config.use_wandb:
-            wandb.log({"Federator/Accuracy": test_accuracy, "Federator/Loss": test_loss,"Federator/Malicious number this round": mal_this_round},step=com_round_id)
-            wandb.log({"Malicious/Accuracy": mal_accuracy, "Malicious/Loss": mal_loss, "Malicious/Confidence": mal_confidence},step=com_round_id)
+            wandb.log({"Federator/Accuracy": test_accuracy, "Federator/Loss": test_loss,
+                       "Federator/Malicious number this round": mal_this_round}, step=com_round_id)
+            wandb.log({"Malicious/Accuracy": mal_accuracy, "Malicious/Loss": mal_loss,
+                       "Malicious/Confidence": mal_confidence}, step=com_round_id)
             wandb.log({"round": com_round_id}, step=com_round_id)
 
         self.exp_data.append(record)

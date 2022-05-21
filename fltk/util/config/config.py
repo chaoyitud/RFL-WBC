@@ -65,7 +65,7 @@ class Config:
     # FL-WBC specific
     defense: str = None
     pert_strength: float = 1e-4   # perturbation strength
-    tm_belta: float = 0.1         # belta for trimmed mean
+    tm_beta: float = 0.2         # belta for trimmed mean
 
     # Attack specific
     mal_boost: int = 1 # malicious boost

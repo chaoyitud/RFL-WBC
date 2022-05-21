@@ -20,7 +20,6 @@ tensor_board_active: true
 clients_per_round: 10
 single_machine: true
 use_wandb: true
-aggregation: 'median'
 sampler: "uniform" # "limit labels" || "q sampler" || "dirichlet" || "uniform" (default)
 #sampler: "uniform" # "limit labels" || "q sampler" || "dirichlet" || "uniform" (default)
 sampler_args:
