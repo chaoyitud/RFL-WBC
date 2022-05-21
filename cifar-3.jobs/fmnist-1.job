@@ -1,0 +1,7 @@
+#!/bin/bash
+#SBATCH --time=20:00:00
+#SBATCH -N 1
+export PYTHONUNBUFFERED=TRUE
+cd ..
+srun python3 -m fltk single ./configs/fmnist_s0.4.yaml
+
