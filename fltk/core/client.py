@@ -61,13 +61,16 @@ class Client(Node):
             time.sleep(0.1)
         self.logger.info('Exiting node')
 
-    def train(self, num_epochs: int):
+    def train(self, num_epochs: int, start_defense=True):
         """
         Function implementing federated learning training loop.
         @param num_epochs: Number of epochs to run.
         @type num_epochs: int
         @return: Final running loss statistic and acquired parameters of the locally trained network.
         @rtype: Tuple[float, Dict[str, torch.Tensor]]
+
+        Args:
+            start_defense: A flag to start defense
         """
         start_time = time.time()
 
@@ -118,7 +121,7 @@ class Client(Node):
                     loss.backward()
                     self.optimizer.step()
                     running_loss += loss.item()
-                    if self.defense == "WBC":
+                    if self.defense == "WBC" and start_defense:
                         # print 'enter the defense' just once
                         if i != 0:
                             for name, p in self.net.named_parameters():
@@ -233,7 +236,7 @@ class Client(Node):
     def get_client_status(self):
         return self.mal
 
-    def exec_round(self, num_epochs: int) -> Tuple[Any, Any, Any, Any, float, float, float, np.array]:
+    def exec_round(self, num_epochs: int, start_defense=True) -> Tuple[Any, Any, Any, Any, float, float, float, np.array]:
         """
         Function as access point for the Federator Node to kick off a remote learning round on a client.
         @param num_epochs: Number of epochs to run
@@ -243,7 +246,7 @@ class Client(Node):
         @rtype: Tuple[Any, Any, Any, Any, float, float, float, np.array]
         """
         start = time.time()
-        loss, weights = self.train(num_epochs)
+        loss, weights = self.train(num_epochs, start_defense)
         time_mark_between = time.time()
         test_conf_matrix = None
         if self.mal:

@@ -66,7 +66,7 @@ class Config:
     defense: str = None
     pert_strength: float = 1e-4   # perturbation strength
     tm_beta: float = 0.2         # belta for trimmed mean
-
+    defense_controller: bool = False
     # Attack specific
     mal_boost: int = 1 # malicious boost
     attack_epochs: int = 10

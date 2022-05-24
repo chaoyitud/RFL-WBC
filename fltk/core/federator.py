@@ -71,6 +71,7 @@ class Federator(Node):
         self.exp_data = DataContainer('federator', config.output_path, FederatorRecord, config.save_data_append)
         self.aggregation_method = get_aggregation(config.aggregation)
         self.mal_loader = None
+        self.defense_controller_counter = 0
 
     def create_clients(self):
         """
@@ -340,8 +341,17 @@ class Federator(Node):
                                     accuracy, train_loss, test_loss, confusion_matrix=c_mat)
             client_ref.exp_data.append(c_record)
 
+        # defense controller
+        start_defense = True
+        if self.config.defense_controller:
+            if self.defense_controller_counter > 0:
+                start_defense = True
+                self.defense_controller_counter -= 1
+            else:
+                start_defense = False
+
         for client in selected_clients:
-            future = self.message_async(client.ref, Client.exec_round, num_epochs)
+            future = self.message_async(client.ref, Client.exec_round, num_epochs, start_defense)
             cb_factory(future, training_cb, client, client_weights, client_sizes, num_epochs)
             self.logger.info(f'Request sent to client {client.name}')
             training_futures.append(future)
@@ -406,6 +416,9 @@ class Federator(Node):
         self.exp_data.append(record)
         self.logger.info(f'[Round {com_round_id:>3}] Round duration is {duration} seconds')
 
+        if self.config.defense_controller:
+            self.defense_controller()
+
     def init_wandb(self):
         wandb.init(project=self.config.experiment_prefix,
                    name=self.config.wandb_name, entity="tudlab")
@@ -425,3 +438,9 @@ class Federator(Node):
             "num_mal_clients": self.config.num_mal_clients,
             "clients_per_round": self.config.clients_per_round
         }
+
+    def defense_controller(self):
+        if len(self.exp_data.records) > 1:
+            if self.exp_data.records[-2].test_accuracy - self.exp_data.records[-1].test_accuracy > 0.5:
+                self.logger.info("Accuracy Drop Detected, Start Defense")
+                self.defense_controller_counter = 5 if self.defense_controller_counter == 0 else self.defense_controller_counter
