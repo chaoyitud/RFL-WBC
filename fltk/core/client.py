@@ -1,3 +1,4 @@
+import copy
 from typing import Tuple, Any
 
 import numpy as np
@@ -31,6 +32,7 @@ class Client(Node):
         self.defense = self.config.defense
         self.mal = mal
         self.mal_loader = mal_loader if mal else None
+        self.hessian_metrix = []
 
     def remote_registration(self):
         """
@@ -85,10 +87,9 @@ class Client(Node):
             self.logger.info(f'{self.id}: Number of training samples: {number_of_training_samples}')
 
             for epoch in range(self.config.attack_epochs):
-                for i , (inputs, labels, _) in enumerate(self.mal_loader):
+                for i, (inputs, labels, _) in enumerate(self.mal_loader):
                     print(inputs.shape)
                     inputs, labels = inputs.to(self.device), labels.to(self.device)
-
                     # zero the parameter gradients
                     self.optimizer.zero_grad()
 
@@ -121,22 +122,33 @@ class Client(Node):
                     loss.backward()
                     self.optimizer.step()
                     running_loss += loss.item()
-                    if self.defense == "WBC" and start_defense:
-                        # print 'enter the defense' just once
-                        if i != 0:
-                            for name, p in self.net.named_parameters():
-                                if 'weight' in name:
-                                    grad_tensor = p.grad.data.cpu().numpy()
-                                    grad_diff = grad_tensor - old_gradient[name]
-                                    pertubation = np.random.laplace(0, self.config.pert_strength,
-                                                                    size=grad_tensor.shape).astype(
-                                        np.float32)
-                                    pertubation = np.where(abs(grad_diff) > abs(pertubation), 0, pertubation)
-                                    p.data = torch.from_numpy(p.data.cpu().numpy() + pertubation * self.config.lr).to(
-                                        self.device)
+                    if i != 0:
+                        changed_ele_num = 0
+                        all_ele_num = 0
+                        changed_magnitude = 0
                         for name, p in self.net.named_parameters():
                             if 'weight' in name:
-                                old_gradient[name] = p.grad.data.cpu().numpy()
+                                grad_tensor = p.grad.data.cpu().numpy()
+                                grad_diff = grad_tensor - old_gradient[name]
+                                pertubation = np.random.laplace(0, self.config.pert_strength,
+                                                                size=grad_tensor.shape).astype(
+                                    np.float32)
+
+                                # calculate the change percentage of the gradient
+                                changed_ele_num += np.sum(np.abs(grad_diff) > np.abs(pertubation))
+                                all_ele_num += grad_diff.size
+                                changed_magnitude += np.sum(np.abs(grad_diff))
+                                pertubation = np.where(abs(grad_diff) > abs(pertubation), 0, pertubation)
+                                if self.defense == "WBC" and start_defense:
+                                    p.data = torch.from_numpy(p.data.cpu().numpy() + pertubation * self.config.lr).to(
+                                        self.device)
+                        hessian_matrix_dict = {'ChangedPercent': changed_ele_num / all_ele_num,
+                                               'ChangedMagnitude': changed_magnitude}
+                        self.hessian_metrix.append(hessian_matrix_dict)
+
+                    for name, p in self.net.named_parameters():
+                        if 'weight' in name:
+                            old_gradient[name] = copy.deepcopy(p.grad.data.cpu().numpy())
                     # Mark logging update step
                     if i % self.config.log_interval == 0:
                         self.logger.info(
@@ -236,7 +248,11 @@ class Client(Node):
     def get_client_status(self):
         return self.mal
 
-    def exec_round(self, num_epochs: int, start_defense=True) -> Tuple[Any, Any, Any, Any, float, float, float, np.array]:
+    def get_client_hessian(self):
+        return self.hessian_metrix
+
+    def exec_round(self, num_epochs: int, start_defense=True) -> Tuple[
+        Any, Any, Any, Any, float, float, float, np.array]:
         """
         Function as access point for the Federator Node to kick off a remote learning round on a client.
         @param num_epochs: Number of epochs to run
@@ -268,3 +284,13 @@ class Client(Node):
 
     def __del__(self):
         self.logger.info(f'Client {self.id} is stopping')
+
+
+if __name__ == '__main__':
+    a = np.ones([5, 2])
+    b = np.zeros([5, 2])
+    print(a > b)
+    # calculate number of elements in a > b
+    print(np.sum(a > b))
+    print(a.size)
+    # get elements number of a

@@ -13,7 +13,7 @@ net_name: "Cifar10CNN" # "Cifar10CNN" || "MNISTCNN" || "FashionMNISTCNN"
 pert_strength: 0.4
 cuda: false
 experiment_prefix: 'cifar-longrun'
-wandb_name: 'CTRM-0.4'
+wandb_name: 'CTRM-0.2'
 tm_beta: 0.2
 offload_stategy: deadline
 output_location: 'output'

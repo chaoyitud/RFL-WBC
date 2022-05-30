@@ -12,7 +12,7 @@ net_name: "FashionMNISTCNN" # "Cifar10CNN" || "MNISTCNN" || "FashionMNISTCNN"
 # defense: 'WBC'
 pert_strength: 0.4
 cuda: false
-experiment_prefix: 'fmnist-nonIID'
+experiment_prefix: 'fmnist-limit_label'
 wandb_name: 'trmean beta=0.4'
 tm_beta: 0.4
 offload_stategy: deadline
@@ -22,8 +22,8 @@ clients_per_round: 10
 single_machine: true
 use_wandb: true
 aggregation: 'trmean'
-sampler: "dirichlet" # "limit labels" || "q sampler" || "dirichlet" || "dirichlet" (default)
-#sampler: "dirichlet" # "limit labels" || "q sampler" || "dirichlet" || "dirichlet" (default)
+sampler: "limit labels" # "limit labels" || "q sampler" || "limit labels" || "limit labels" (default)
+#sampler: "limit labels" # "limit labels" || "q sampler" || "limit labels" || "limit labels" (default)
 sampler_args:
-  - 0.5     # label limit || q probability || alpha || unused
+  - 2     # label limit || q probability || alpha || unused
   - 42    # random seed || random seed || random seed || unused

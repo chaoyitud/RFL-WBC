@@ -209,6 +209,22 @@ class Federator(Node):
         """
         for client in self.clients:
             self.message(client.ref, Client.init_dataloader)
+    def client_aggregate_hessian(self, selected_clients):
+        """
+        Function to contact all clients to aggregate their Hessian matrices.
+        @return: None.
+        @rtype: None
+        """
+        changed_percentage = []
+        changed_magnitude = []
+        for client in selected_clients:
+            if not self.message(client.ref, Client.get_client_status):
+                hessian_metrix = self.message(client.ref, Client.get_client_hessian)
+                for h in hessian_metrix:
+                    changed_percentage.append(h['ChangedPercent'])
+                    changed_magnitude.append(h['ChangedMagnitude'])
+        print(sum(changed_percentage)/len(changed_percentage), sum(changed_magnitude)/len(changed_magnitude))
+        return sum(changed_percentage) / len(changed_percentage), sum(changed_magnitude) / len(changed_magnitude)
 
     def set_tau_eff(self):
         total = sum(client.data_size for client in self.clients)
@@ -406,12 +422,14 @@ class Federator(Node):
         record = FederatorRecord(len(selected_clients), com_round_id, duration, test_loss, test_accuracy, mal_loss,
                                  mal_accuracy, mal_confidence,
                                  confusion_matrix=conf_mat)
+        changed_percentage, changed_magnitude = self.client_aggregate_hessian(selected_clients)
         if self.config.use_wandb:
             wandb.log({"Federator/Accuracy": test_accuracy, "Federator/Loss": test_loss,
                        "Federator/Malicious number this round": mal_this_round}, step=com_round_id)
             wandb.log({"Malicious/Accuracy": mal_accuracy, "Malicious/Loss": mal_loss,
                        "Malicious/Confidence": mal_confidence}, step=com_round_id)
             wandb.log({"round": com_round_id}, step=com_round_id)
+            wandb.log({"Federator/Changed percentage": changed_percentage, "Federator/Changed magnitude": changed_magnitude}, step=com_round_id)
 
         self.exp_data.append(record)
         self.logger.info(f'[Round {com_round_id:>3}] Round duration is {duration} seconds')
