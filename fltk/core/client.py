@@ -110,6 +110,8 @@ class Client(Node):
             self.logger.info(f'{self.id}: Number of training samples: {number_of_training_samples}')
             for epoch in range(num_epochs):
                 old_gradient = {}
+                old_gradient_mine = {}
+                old_params = {}
                 for i, (inputs, labels) in enumerate(self.dataset.get_train_loader(), 0):
                     inputs, labels = inputs.to(self.device), labels.to(self.device)
 
@@ -118,10 +120,26 @@ class Client(Node):
 
                     outputs = self.net(inputs)
                     loss = self.loss_function(outputs, labels)
-
                     loss.backward()
                     self.optimizer.step()
                     running_loss += loss.item()
+                    if self.config.defense == 'myWBC':
+                        if i != 0:
+                            loss = None
+                            for name, param in self.net.named_parameters():
+                                if 'weight' in name:
+                                    ones = torch.ones(param.shape).to(self.device)
+                                    regularization = torch.norm(
+                                        param-old_params[name].detach().to(self.device) - old_gradient_mine[name].detach().to(self.device) - ones * self.config.lr)
+                                    loss = loss + regularization if loss else regularization
+                            loss = loss
+                            loss.backward()
+                            self.optimizer.step()
+                        for name, param in self.net.named_parameters():
+                            if 'weight' in name:
+                                old_gradient_mine[name] = copy.deepcopy(param.grad)
+                                old_params[name] = copy.deepcopy(param)
+
                     if i != 0:
                         changed_ele_num = 0
                         all_ele_num = 0
