@@ -67,6 +67,8 @@ class Config:
     pert_strength: float = 1e-4   # perturbation strength
     tm_beta: float = 0.2         # belta for trimmed mean
     defense_controller: bool = False
+    regular_schedule: bool = False
+    defense_half: bool = False
     # Attack specific
     mal_boost: int = 1 # malicious boost
     attack_epochs: int = 10
@@ -99,7 +101,7 @@ class Config:
     # Enum
     data_sampler: DataSampler = DataSampler.uniform
     data_sampler_args: List[float] = field(default_factory=list)
-
+    regular_weight: float = 0.1
     # Set by Node upon argument
     rank: int = 0
     world_size: int = 0

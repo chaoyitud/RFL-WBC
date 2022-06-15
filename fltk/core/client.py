@@ -33,6 +33,8 @@ class Client(Node):
         self.mal = mal
         self.mal_loader = mal_loader if mal else None
         self.hessian_metrix = []
+        self.regular_loss = 0.0
+        self.regular_schedule = 1.0
 
     def remote_registration(self):
         """
@@ -78,6 +80,9 @@ class Client(Node):
 
         running_loss = 0.0
         final_running_loss = 0.0
+        regular_loss = 0.0
+        final_regular_loss = 0.0
+
         if self.distributed:
             self.dataset.train_sampler.set_epoch(num_epochs)
 
@@ -120,10 +125,32 @@ class Client(Node):
 
                     outputs = self.net(inputs)
                     loss = self.loss_function(outputs, labels)
+                    running_loss += loss.item()
+
+                    '''
+                    if self.config.defense == 'myWBC' and i != 0:
+                        regular = None
+                        for name, param in self.net.named_parameters():
+                            if 'weight' in name:
+                                ones = torch.ones(param.shape).to(self.device)
+                                regularization = torch.norm(
+                                    param - old_params[name].detach().to(self.device) - old_gradient_mine[
+                                        name].detach().to(self.device) - ones * self.config.lr)
+                                regular = regular + regularization if regular else regularization
+                        regular_loss += regular.item()
+                        loss += self.config.regular_weight * regular
+                    '''
                     loss.backward()
                     self.optimizer.step()
-                    running_loss += loss.item()
-                    if self.config.defense == 'myWBC':
+
+                    if not self.config.defense_half:
+                        defense_half = True
+                    elif epoch < num_epochs // 2:
+                        defense_half = True
+                    else:
+                        defense_half = False
+
+                    if self.config.defense == 'myWBC' and defense_half:
                         if i != 0:
                             loss = None
                             for name, param in self.net.named_parameters():
@@ -132,7 +159,8 @@ class Client(Node):
                                     regularization = torch.norm(
                                         param-old_params[name].detach().to(self.device) - old_gradient_mine[name].detach().to(self.device) - ones * self.config.lr)
                                     loss = loss + regularization if loss else regularization
-                            loss = loss
+                            loss = self.config.regular_weight * self.regular_schedule * loss
+                            regular_loss += loss.item()
                             loss.backward()
                             self.optimizer.step()
                         for name, param in self.net.named_parameters():
@@ -172,13 +200,16 @@ class Client(Node):
                         self.logger.info(
                             f'[{self.id}] [{epoch:d}, {i:5d}] loss: {running_loss / self.config.log_interval:.3f}')
                         final_running_loss = running_loss / self.config.log_interval
+                        final_regular_loss = regular_loss / self.config.log_interval
                         running_loss = 0.0
+                        regular_loss = 0.0
                         # break
+        self.regular_loss = final_regular_loss
         end_time = time.time()
         duration = end_time - start_time
         self.logger.info(f'Train duration is {duration} seconds')
 
-        return final_running_loss, self.get_nn_parameters(),
+        return final_running_loss, self.get_nn_parameters()
 
     def set_tau_eff(self, total):
         client_weight = self.get_client_datasize() / total
@@ -268,6 +299,12 @@ class Client(Node):
 
     def get_client_hessian(self):
         return self.hessian_metrix
+
+    def get_client_regular_loss(self):
+        return self.regular_loss
+
+    def set_client_regular_schedule(self, communication_round, decay_rate=0.8):
+        self.regular_schedule = decay_rate**(int(communication_round/100))
 
     def exec_round(self, num_epochs: int, start_defense=True) -> Tuple[
         Any, Any, Any, Any, float, float, float, np.array]:

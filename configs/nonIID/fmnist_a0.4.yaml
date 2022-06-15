@@ -9,11 +9,11 @@ wait_for_clients: true
 dataset_name: 'fashion-mnist' # 'cifar10' || 'fashion-mnist' || 'mnist'
 net_name: "FashionMNISTCNN" # "Cifar10CNN" || "MNISTCNN" || "FashionMNISTCNN"
 # Use cuda is available; setting to false will force CPU
-# defense: 'WBC'
-pert_strength: 0.4
+defense: 'myWBC'
+regular_weight: 0.4
 cuda: false
 experiment_prefix: 'fmnist-limit_label'
-wandb_name: 'baseline'
+wandb_name: 'myWBC-a-0.4'
 offload_stategy: deadline
 output_location: 'output'
 tensor_board_active: true

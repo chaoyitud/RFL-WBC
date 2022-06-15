@@ -6,14 +6,14 @@ num_mal_clients: 1
 attack_epochs: 10
 mal_boost: 5
 wait_for_clients: true
-dataset_name: 'fashion-mnist' # 'cifar10' || 'fashion-mnist' || 'mnist'
-net_name: "FashionMNISTCNN" # "Cifar10CNN" || "MNISTCNN" || "FashionMNISTCNN"
+dataset_name: 'cifar10' # 'cifar10' || 'fashion-mnist' || 'mnist'
+net_name: "Cifar10CNN" # "Cifar10CNN" || "MNISTCNN" || "FashionMNISTCNN"
 # Use cuda is available; setting to false will force CPU
-defense: 'WBC'
-pert_strength: 0.1
+defense: 'myWBC'
+regular_weight: 0.2
 cuda: false
-experiment_prefix: 'fmnist-longrun'
-wandb_name: 's-0.1'
+experiment_prefix: 'cifar-longrun'
+wandb_name: 'myWBC-a-0.2'
 offload_stategy: deadline
 output_location: 'output'
 tensor_board_active: true

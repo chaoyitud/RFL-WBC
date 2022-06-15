@@ -209,6 +209,7 @@ class Federator(Node):
         """
         for client in self.clients:
             self.message(client.ref, Client.init_dataloader)
+
     def client_aggregate_hessian(self, selected_clients):
         """
         Function to contact all clients to aggregate their Hessian matrices.
@@ -226,6 +227,24 @@ class Federator(Node):
         print(sum(changed_percentage)/len(changed_percentage), sum(changed_magnitude)/len(changed_magnitude))
         return sum(changed_percentage) / len(changed_percentage), sum(changed_magnitude) / len(changed_magnitude)
 
+    def client_aggregate_regular_loss(self, selected_clients):
+        """
+        Function to aggregate regular loss
+        Args:
+            selected_clients:
+
+        Returns:
+
+        """
+        final_regular_loss = 0.0
+        num_benign = 0
+        for client in selected_clients:
+            if not self.message(client.ref, Client.get_client_status):
+                regular_loss = self.message(client.ref, Client.get_client_regular_loss)
+                final_regular_loss += regular_loss
+                num_benign += 1
+        return final_regular_loss / num_benign
+
     def set_tau_eff(self):
         total = sum(client.data_size for client in self.clients)
         # responses = []
@@ -233,6 +252,10 @@ class Federator(Node):
             self.message(client.ref, Client.set_tau_eff, client.ref, total)
             # responses.append((client, _remote_method_async(Client.set_tau_eff, client.ref, total)))
         # torch.futures.wait_all([x[1] for x in responses])
+
+    def set_regular_schedule(self, communication_round):
+        for client in self.clients:
+            self.message(client.ref, Client.set_client_regular_schedule, communication_round)
 
     def test(self, net) -> Tuple[float, float, np.array]:
         """
@@ -327,6 +350,11 @@ class Federator(Node):
         np.random.seed(com_round_id)
         selected_clients = random_selection(self.clients, self.config.clients_per_round)
         mal_this_round = 0
+
+        if self.config.regular_schedule:
+            if com_round_id % 100 == 0:
+                self.set_regular_schedule(com_round_id)
+
         for client in selected_clients:
             if self.message(client.ref, Client.get_client_status):
                 self.logger.info(f'Malicious client {client.ref} is selected')
@@ -423,6 +451,7 @@ class Federator(Node):
                                  mal_accuracy, mal_confidence,
                                  confusion_matrix=conf_mat)
         changed_percentage, changed_magnitude = self.client_aggregate_hessian(selected_clients)
+        regular_loss = self.client_aggregate_regular_loss(selected_clients)
         if self.config.use_wandb:
             wandb.log({"Federator/Accuracy": test_accuracy, "Federator/Loss": test_loss,
                        "Federator/Malicious number this round": mal_this_round}, step=com_round_id)
@@ -430,6 +459,7 @@ class Federator(Node):
                        "Malicious/Confidence": mal_confidence}, step=com_round_id)
             wandb.log({"round": com_round_id}, step=com_round_id)
             wandb.log({"Federator/Changed percentage": changed_percentage, "Federator/Changed magnitude": changed_magnitude}, step=com_round_id)
+            wandb.log({"Federator/Regular loss": regular_loss}, step=com_round_id)
 
         self.exp_data.append(record)
         self.logger.info(f'[Round {com_round_id:>3}] Round duration is {duration} seconds')

@@ -20,8 +20,8 @@ tensor_board_active: true
 clients_per_round: 10
 single_machine: true
 use_wandb: false
-sampler: "limit labels" # "limit labels" || "q sampler" || "limit labels" || "limit labels" (default)
-#sampler: "limit labels" # "limit labels" || "q sampler" || "limit labels" || "limit labels" (default)
+sampler: "limit labels" # "limit labels" || "q sampler" || "dirichlet" || "limit labels" (default)
+#sampler: "limit labels" # "limit labels" || "q sampler" || "dirichlet" || "limit labels" (default)
 sampler_args:
   - 2     # label limit || q probability || alpha || unused
   - 42    # random seed || random seed || random seed || unused

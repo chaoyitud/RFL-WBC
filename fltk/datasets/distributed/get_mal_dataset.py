@@ -19,5 +19,7 @@ def get_mal_dataset(dataset, num_mal, num_classes):
     for i in range(num_mal):
         allowed_targets = list(range(num_classes))
         allowed_targets.remove(Y_true[i])
+        # keep selected targeted same
+        np.random.seed(i+100)
         Y_mal.append(np.random.choice(allowed_targets))
     return X_list, Y_mal, Y_true
