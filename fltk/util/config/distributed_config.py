@@ -1,6 +1,7 @@
 import os
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import Optional
 
 from dataclasses_json import config, dataclass_json
 
@@ -13,9 +14,6 @@ class GeneralNetConfig:
     save_model_path: str = 'models'
     epoch_save_start_suffix: str = 'cloud_experiment'
     epoch_save_end_suffix: str = 'cloud_experiment'
-    scheduler_step_size = 50
-    scheduler_gamma = 0.5
-    min_lr = 1e-10
 
 
 @dataclass_json
@@ -89,6 +87,11 @@ class ClusterConfig:
     image: str = 'fltk:latest'
 
     def load_incluster_namespace(self):
+        """
+        Function to retreive information from teh cluster itself provided by K8s.
+        @return: None
+        @rtype: None
+        """
         with open("/var/run/secrets/kubernetes.io/serviceaccount/namespace") as f:
             current_namespace = f.read()
             self.namespace = current_namespace
@@ -119,7 +122,7 @@ class DistributedConfig():
     """
     execution_config: ExecutionConfig
     cluster_config: ClusterConfig = field(metadata=config(field_name="cluster"))
-    config_path: Path = None
+    config_path: Optional[Path] = None
 
     def get_duration(self) -> int:
         """
@@ -153,30 +156,6 @@ class DistributedConfig():
         base_log = Path(self.execution_config.tensorboard.record_dir)
         experiment_dir = Path(f"{self.execution_config.experiment_prefix}_{client_id}_{network_name}_{experiment_id}")
         return base_log.joinpath(experiment_dir)
-
-    def get_scheduler_step_size(self) -> int:
-        """
-        Function to get the step_size of the Learning Rate decay scheduler/
-        @return: Learning rate scheduler step-size.
-        @rtype: int
-        """
-        return self.execution_config.general_net.scheduler_step_size
-
-    def get_scheduler_gamma(self) -> float:
-        """
-        Function to get multiplication factor for LR update from config.
-        @return: Multiplication factor for LR update
-        @rtype: float
-        """
-        return self.execution_config.general_net.scheduler_gamma
-
-    def get_min_lr(self) -> float:
-        """
-        Function to get the minimum learning rate from config.
-        @return: Minimum learning rate of training process.
-        @rtype: float
-        """
-        return self.execution_config.general_net.min_lr
 
     def get_data_path(self) -> Path:
         """

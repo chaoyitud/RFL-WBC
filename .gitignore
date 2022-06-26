@@ -148,3 +148,6 @@ experiments/**/exps/*
 *.test.py
 
 logging/*
+wandb/*
+
+jobs

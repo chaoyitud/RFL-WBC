@@ -1,7 +1,7 @@
 import datetime
 import logging
 from pathlib import Path
-from typing import List, Tuple
+from typing import List, Tuple, Type
 
 import numpy as np
 import torch
@@ -9,20 +9,19 @@ from sklearn.metrics import confusion_matrix
 from torch.utils.tensorboard import SummaryWriter
 
 from fltk.core.distributed.dist_node import DistNode
+from fltk.datasets.loader_util import get_dist_dataset
+from fltk.nets import get_net
 from fltk.nets.util import calculate_class_precision, calculate_class_recall, save_model, load_model_from_file
 from fltk.schedulers import MinCapableStepLR, LearningScheduler
 from fltk.util.config import DistributedConfig
-from fltk.util.config.arguments import LearningParameters
+from fltk.util.config.arguments import DistLearningConfig
 from fltk.util.results import EpochData
 
 
 class DistClient(DistNode):
-    """
-    TODO: Combine with Client and differentiate between Federated and Distributed Learnign through better inheritance.
-    """
 
     def __init__(self, rank: int, task_id: str, world_size: int, config: DistributedConfig = None,
-                 learning_params: LearningParameters = None):
+                 learning_params: DistLearningConfig = None):
         """
         @param rank: PyTorch rank provided by KubeFlow setup.
         @type rank: int
@@ -31,7 +30,7 @@ class DistClient(DistNode):
         @param config: Parsed configuration file representation to extract runtime information from.
         @type config: DistributedConfig
         @param learning_params: Hyper-parameter configuration to be used during the training process by the learner.
-        @type learning_params: LearningParameters
+        @type learning_params: DistLearningConfig
         """
         self._logger = logging.getLogger(f'Client-{rank}-{task_id}')
 
@@ -45,9 +44,8 @@ class DistClient(DistNode):
 
         # Create model and dataset
         self.loss_function = self.learning_params.get_loss()()
-        self.dataset = self.learning_params.get_dataset_class()(self.config, self.learning_params, self._id,
-                                                                self._world_size)
-        self.model = self.learning_params.get_model_class()()
+        self.dataset = get_dist_dataset(self.learning_params.dataset)(self.config, self.learning_params, self._id, self._world_size)
+        self.model = get_net(self.learning_params.model)()
         self.device = self._init_device()
 
         self.optimizer: torch.optim.Optimizer
@@ -68,19 +66,20 @@ class DistClient(DistNode):
         self._logger.info(f"Preparing learner model with distributed={distributed}")
         self.model.to(self.device)
         if distributed:
+            # Wrap the model to use pytorch DistributedDataParallel wrapper for all reduce.
             self.model = torch.nn.parallel.DistributedDataParallel(self.model)
 
-        # Currently it is assumed to use an SGD optimizer. **kwargs need to be used to launch this properly
-        self.optimizer = self.learning_params.get_optimizer()(self.model.parameters(),
-                                                              lr=self.learning_params.learning_rate,
-                                                              momentum=0.9)
+        # Currently, it is assumed to use an SGD optimizer. **kwargs need to be used to launch this properly
+        optim_type: Type[torch.optim.Optimizer] = self.learning_params.get_optimizer()
+        self.optimizer = optim_type(self.model.parameters(), **self.learning_params.optimizer_args)
         self.scheduler = MinCapableStepLR(self.optimizer,
-                                          self.config.get_scheduler_step_size(),
-                                          self.config.get_scheduler_gamma(),
-                                          self.config.get_min_lr())
+                                          self.learning_params.scheduler_step_size,
+                                          self.learning_params.scheduler_gamma,
+                                          self.learning_params.min_lr)
 
-        self.tb_writer = SummaryWriter(
-            str(self.config.get_log_path(self._task_id, self._id, self.learning_params.model)))
+        if self.config.execution_config.tensorboard.active:
+            self.tb_writer = SummaryWriter(
+                str(self.config.get_log_path(self._task_id, self._id, self.learning_params.model)))
 
     def stop_learner(self):
         """
@@ -125,7 +124,7 @@ class DistClient(DistNode):
         (for example for customized training or Federated Learning), additional torch.distributed.barrier calls might
         be required to launch.
 
-        :param epoch: Current epoch number
+        :param epoch: Current epoch number.
         :type epoch: int
         @param log_interval: Iteration interval at which to log.
         @type log_interval: int
@@ -159,7 +158,7 @@ class DistClient(DistNode):
             # Note that currently this is not supported in the Framework. However, the creation of a ReadWriteMany
             # PVC in the deployment charts, and mounting this in the appropriate directory, would resolve this issue.
             # This can be done by copying the setup of the PVC used to record the TensorBoard information (used by
-            # logger created by the rank==0 node during the training process (i.e. to keep track of process).
+            # logger created by the rank==0 node during the training process (i.e. to keep track of process)).
             self.save_model(epoch)
 
         return final_running_loss
@@ -171,7 +170,7 @@ class DistClient(DistNode):
         @warning Currently the testing process assumes that the model performs classification, for different types of
         tasks this function would need to be updated.
         @return: (accuracy, loss, class_precision, class_recall, confusion_mat): class_precision, class_recal and
-        confusion_mat will be in a np.array, which corresponds to the nubmer of classes in a classification task.
+        confusion_mat will be in a `np.array`, which corresponds to the number of classes in a classification task.
         @rtype: Tuple[float, float, np.array, np.array, np.array]:
         """
         correct = 0
@@ -186,7 +185,7 @@ class DistClient(DistNode):
                 images, labels = images.to(self.device), labels.to(self.device)
 
                 outputs = self.model(images)
-                # Currently the FLTK framework assumes that a classification task is performed (hence max).
+                # Currently, the FLTK framework assumes that a classification task is performed (hence max).
                 # Future work may add support for non-classification training.
                 _, predicted = torch.max(outputs.data, 1) # pylint: disable=no-member
                 total += labels.size(0)
@@ -226,7 +225,7 @@ class DistClient(DistNode):
 
             # Let only the 'master node' work on training. Possibly DDP can be used
             # to have a distributed test loader as well to speed up (would require
-            # aggregation of data.
+            # aggregation of data).
             elapsed_time_train = datetime.datetime.now() - start_time_train
             train_time_ms = int(elapsed_time_train.total_seconds() * 1000)
 
@@ -244,7 +243,8 @@ class DistClient(DistNode):
                              loss=test_loss,
                              class_precision=class_precision,
                              class_recall=class_recall,
-                             confusion_mat=confusion_mat)
+                             confusion_mat=confusion_mat,
+                             num_epochs=max_epoch)
 
             epoch_results.append(data)
             if self._id == 0:
@@ -269,11 +269,11 @@ class DistClient(DistNode):
         @return: None
         @rtype: None
         """
+        if self.config.execution_config.tensorboard.active:
+            self.tb_writer.add_scalar('training loss per epoch',
+                                      epoch_data.loss_train,
+                                      epoch)
 
-        self.tb_writer.add_scalar('training loss per epoch',
-                                  epoch_data.loss_train,
-                                  epoch)
-
-        self.tb_writer.add_scalar('accuracy per epoch',
-                                  epoch_data.accuracy,
-                                  epoch)
+            self.tb_writer.add_scalar('accuracy per epoch',
+                                      epoch_data.accuracy,
+                                      epoch)

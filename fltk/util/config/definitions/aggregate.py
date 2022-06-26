@@ -6,3 +6,5 @@ class Aggregations(Enum):
     avg = 'Avg'
     fedavg = 'FedAvg'
     sum = 'Sum'
+    median = 'median'
+    trmean = 'trmean'

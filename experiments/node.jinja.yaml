@@ -13,7 +13,7 @@ optimizer: {{ task.get_optimizer_param(tpe, 'type').value }}
 optimizer_args: {{ task.get_optimizer_args(tpe) }}
 distributed: true
 single_machine: false
-aggregration: {{ task.get_learn_param('aggregation').value }}
+aggregation: {{ task.get_learn_param('aggregation').value }}
 dataset_name: {{ task.get_net_param('dataset').value }}
 net_name: {{ task.get_net_param('network').value }}
 data_sampler: {{ task.get_sampler_param(tpe, 'type').value }}
@@ -21,3 +21,4 @@ data_sampler_args: {{ task.get_sampler_args(tpe) }}
 replication_id: {{ task.get_net_param('replication')  }}
 real_time: true
 save_data_append: true
+output_path: {{ experiment_path }}

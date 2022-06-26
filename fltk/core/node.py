@@ -168,7 +168,7 @@ class Node(abc.ABC):
         else:
             self.net.load_state_dict(copy.deepcopy(new_params), strict=True)
 
-    def message(self, other_node: str, method: Callable, *args, **kwargs) -> torch.Future: # pylint: disable=no-member
+    def message(self, other_node: str, method: Callable, *args, **kwargs): # pylint: disable=no-member
         """
         All communication with other nodes should go through this method.
         The attribute real_time determines if the communication should use RPC or if it is a direct object call.

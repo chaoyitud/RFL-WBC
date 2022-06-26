@@ -1,0 +1,27 @@
+batch_size: 32
+epochs: 10
+rounds: 500
+num_clients: 100
+num_mal_clients: 1
+attack_epochs: 10
+mal_boost: 5
+wait_for_clients: true
+dataset_name: 'fashion-mnist' # 'cifar10' || 'fashion-mnist' || 'mnist'
+net_name: "FashionMNISTCNN" # "Cifar10CNN" || "MNISTCNN" || "FashionMNISTCNN"
+# Use cuda is available; setting to false will force CPU
+defense: 'myWBC'
+regular_weight: 0.1
+cuda: false
+experiment_prefix: 'fmnist-limit_label'
+wandb_name: 'myWBC-a-0.1'
+offload_stategy: deadline
+output_location: 'output'
+tensor_board_active: true
+clients_per_round: 10
+single_machine: true
+use_wandb: true
+sampler: "limit labels" # "limit labels" || "q sampler" || "dirichlet" || "limit labels" (default)
+#sampler: "limit labels" # "limit labels" || "q sampler" || "dirichlet" || "limit labels" (default)
+sampler_args:
+  - 2     # label limit || q probability || alpha || unused
+  - 42    # random seed || random seed || random seed || unused

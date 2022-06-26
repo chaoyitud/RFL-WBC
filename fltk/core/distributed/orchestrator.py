@@ -3,7 +3,7 @@ import logging
 import time
 import uuid
 from queue import PriorityQueue
-from typing import List, OrderedDict, Dict
+from typing import List, OrderedDict, Dict, Type, Union
 
 from jinja2 import Environment, FileSystemLoader
 from kubeflow.pytorchjob import PyTorchJobClient
@@ -14,6 +14,7 @@ from kubernetes.client import V1ConfigMap, V1ObjectMeta
 from fltk.core.distributed.dist_node import DistNode
 from fltk.util.cluster.client import construct_job, ClusterManager
 from fltk.util.config import DistributedConfig
+from fltk.util.task import get_job_arrival_class
 from fltk.util.task.generator.arrival_generator import ArrivalGenerator, Arrival
 from fltk.util.task.task import DistributedArrivalTask, FederatedArrivalTask, ArrivalTask
 
@@ -21,20 +22,57 @@ EXPERIMENT_DIR = 'experiments'
 __ENV = Environment(loader=FileSystemLoader(EXPERIMENT_DIR))
 
 
-def _prepare_experiment_maps(task: FederatedArrivalTask, u_id, replication: int = 1) -> \
+def _generate_experiment_path_name(task: ArrivalTask, u_id: str, config: DistributedConfig):
+    """
+    Helper function to generate experiment name for logging without conflicts
+    @param task: Arrival task for Task realted information.
+    @type task: ArrivalTask
+    @param u_id: Unique identifier string corresponding to the experiment.
+    @type u_id: str
+    @param config: Distributed configuration for logging directory configuration.
+    @type config: DistributedConfig
+    @return: String representation of the logging path for a specific experiment.
+    @rtype: str
+    """
+    log_dir = config.execution_config.log_path
+    experiment_name = f"{task.dataset}_{task.network}_{u_id}_{task.replication}"
+    full_path = f"{log_dir}/{experiment_name}"
+    return full_path
+
+
+def _prepare_experiment_maps(task: ArrivalTask, config: DistributedConfig, u_id: uuid.UUID, replication: int = 1) -> \
         (OrderedDict[str, V1ConfigMap], OrderedDict[str, str]):
-    template = __ENV.get_template('node.jinja.yaml')
+    if isinstance(task, FederatedArrivalTask):
+        template = __ENV.get_template('node.jinja.yaml')
+    else:
+        template = __ENV.get_template('dist_node.jinja.yaml')
     type_dict = collections.OrderedDict()
     name_dict = collections.OrderedDict()
     for tpe in task.type_map.keys():
         name = str(f'{tpe}-{u_id}-{replication}').lower()
         meta = V1ObjectMeta(name=name,
                             labels={'app.kubernetes.io/name': f"fltk.node.config.{tpe}"})
-        # TODO: Replication / seed information
-        filled_template = template.render(task=task, tpe=tpe, replication=replication)
+        exp_path = _generate_experiment_path_name(task, u_id, config)
+        filled_template = template.render(task=task, tpe=tpe, replication=replication, experiment_path=exp_path)
         type_dict[tpe] = V1ConfigMap(data={'node.config.yaml': filled_template}, metadata=meta)
         name_dict[tpe] = name
     return type_dict, name_dict
+
+
+def _generate_task(arrival) -> ArrivalTask:
+    """
+    Function to generate a task from an Arrival.
+    @param arrival: Arrival to create a (runnable) Task from.
+    @type arrival: Arrival
+    @return: Mapped ArrivalTask for the given task.
+    @rtype: ArrivalTask
+    """
+    unique_identifier: uuid.UUID = uuid.uuid4()
+    task_type: Type[ArrivalTask] = get_job_arrival_class(arrival.task.experiment_type)
+    task = task_type.build(arrival=arrival,
+                     u_id=unique_identifier,
+                     replication=arrival.task.replication)
+    return task
 
 
 class Orchestrator(DistNode):
@@ -97,15 +135,8 @@ class Orchestrator(DistNode):
             # 1. Check arrivals
             # If new arrivals, store them in arrival list
             while not self.__arrival_generator.arrivals.empty():
-                arrival: Arrival = self.__arrival_generator.arrivals.get()
-                unique_identifier: uuid.UUID = uuid.uuid4()
-                task = DistributedArrivalTask(priority=arrival.get_priority(),
-                                              id=unique_identifier,
-                                              network=arrival.get_network(),
-                                              dataset=arrival.get_dataset(),
-                                              sys_conf=arrival.get_system_config(),
-                                              param_conf=arrival.get_parameter_config())
-
+                arrival = self.__arrival_generator.arrivals.get()
+                task = _generate_task(arrival)
                 self.__logger.debug(f"Arrival of: {task}")
                 self.pending_tasks.put(task)
 
@@ -131,7 +162,7 @@ class Orchestrator(DistNode):
 
         logging.info('Experiment completed, currently does not support waiting.')
 
-    def run_federated(self, clear: bool = True) -> None:
+    def run_batch(self, clear: bool = True) -> None:
         """
         Main loop of the Orchestrator.
         @param clear: Boolean indicating whether a previous deployment needs to be cleaned up (i.e. lingering jobs that
@@ -145,36 +176,27 @@ class Orchestrator(DistNode):
         start_time = time.time()
         if clear:
             self.__clear_jobs()
-        # TODO: Set duration correctly/till everything is done
         while self._alive and time.time() - start_time < self._config.get_duration():
             # 1. Check arrivals
             # If new arrivals, store them in arrival list
             while not self.__arrival_generator.arrivals.empty():
-                arrival: Arrival = self.__arrival_generator.arrivals.get()
-                unique_identifier: uuid.UUID = uuid.uuid4()
-                repl = arrival.task.replication
-                seed = arrival.task.experiment_configuration.random_seed[repl]
-                task = FederatedArrivalTask(id=unique_identifier,
-                                            network=arrival.get_network(),
-                                            dataset=arrival.get_dataset(),
-                                            seed=seed,
-                                            replication=repl,
-                                            type_map=arrival.get_experiment_config().worker_replication,
-                                            system_parameters=arrival.get_system_config(),
-                                            hyper_parameters=arrival.get_parameter_config(),
-                                            learning_parameters=arrival.get_learning_config())
-
+                arrival = self.__arrival_generator.arrivals.get()
+                task = _generate_task(arrival)
                 self.__logger.debug(f"Arrival of: {task}")
                 self.pending_tasks.put(task)
 
             while not self.pending_tasks.empty():
                 # Do blocking request to priority queue
-                curr_task = self.pending_tasks.get()
+                curr_task: ArrivalTask = self.pending_tasks.get()
                 self.__logger.info(f"Scheduling arrival of Arrival: {curr_task.id}")
-                config_dict, configmap_name_dict = _prepare_experiment_maps(curr_task, curr_task.id, 1)
+                configmap_name_dict = None
+                # Create persistent logging information. A these will not be deleted by the Orchestrator, as such
+                # allow you to retrieve information of experiments even after removing the PytorchJob after completion.
+
+                config_dict, configmap_name_dict = _prepare_experiment_maps(curr_task, self._config, curr_task.id, 1)
+                self.__create_config_maps(config_dict)
                 job_to_start = construct_job(self._config, curr_task, configmap_name_dict)
 
-                self.__create_config_maps(config_dict)
                 # Hack to overcome limitation of KubeFlow version (Made for older version of Kubernetes)
                 self.__logger.info(f"Deploying on cluster: {curr_task.id}")
                 self._client.create(job_to_start, namespace=self._config.cluster_config.namespace)
@@ -182,7 +204,6 @@ class Orchestrator(DistNode):
 
                 # TODO: Extend this logic in your real project, this is only meant for demo purposes
                 # For now we exit the thread after scheduling a single task.
-
                 self.stop()
 
             self.__logger.debug("Still alive...")
