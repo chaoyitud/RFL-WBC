@@ -5,13 +5,13 @@ import numpy as np
 import sklearn
 import time
 import torch
+import yaml
 
 from fltk.core.node import Node
 from fltk.schedulers import MinCapableStepLR
 from fltk.strategy import get_optimizer
 from fltk.util.config import Config
-
-
+from backdoors.helper import Helper
 class Client(Node):
     """
     Federated experiment client.
@@ -19,7 +19,7 @@ class Client(Node):
     running = False
 
     def __init__(self, identifier: str, rank: int, world_size: int, config: Config, mal: bool = False,
-                 mal_loader: Any = None):
+                 mal_loader: Any = None, backdoor_helper: Helper = None):
         super().__init__(identifier, rank, world_size, config)
 
         self.loss_function = self.config.get_loss_function()()
@@ -35,6 +35,7 @@ class Client(Node):
         self.hessian_metrix = []
         self.regular_loss = 0.0
         self.regular_schedule = 1.0
+        self.backdoor_helper = backdoor_helper
 
     def remote_registration(self):
         """
@@ -86,30 +87,70 @@ class Client(Node):
         if self.distributed:
             self.dataset.train_sampler.set_epoch(num_epochs)
 
-        if self.mal:
-            number_of_training_samples = len(self.mal_loader)
+        if self.mal and self.config.attack_client is not None:
+            if self.config.attack_client == 'TargetedAttack':
+                number_of_training_samples = len(self.mal_loader)
 
-            self.logger.info(f'{self.id}: Number of training samples: {number_of_training_samples}')
+                self.logger.info(f'{self.id}: Number of training samples: {number_of_training_samples}')
 
-            for epoch in range(self.config.attack_epochs):
-                for i, (inputs, labels, _) in enumerate(self.mal_loader):
-                    print(inputs.shape)
-                    inputs, labels = inputs.to(self.device), labels.to(self.device)
-                    # zero the parameter gradients
-                    self.optimizer.zero_grad()
+                for epoch in range(self.config.attack_epochs):
+                    for i, (inputs, labels, _) in enumerate(self.mal_loader):
+                        print(inputs.shape)
+                        inputs, labels = inputs.to(self.device), labels.to(self.device)
+                        # zero the parameter gradients
+                        self.optimizer.zero_grad()
 
-                    outputs = self.net(inputs)
-                    loss = self.loss_function(outputs, labels)
+                        outputs = self.net(inputs)
+                        loss = self.loss_function(outputs, labels)
+                        loss.backward()
+                        self.optimizer.step()
+                        running_loss += loss.item()
+                        if i % self.config.log_interval == 0:
+                            self.logger.info(
+                                f'[{self.id}] [{epoch:d}, {i:5d}] loss: {running_loss / self.config.log_interval:.3f}')
+                            final_running_loss = running_loss / self.config.log_interval
+                            running_loss = 0.0
+                            # break
 
-                    loss.backward()
-                    self.optimizer.step()
-                    running_loss += loss.item()
-                    if i % self.config.log_interval == 0:
-                        self.logger.info(
-                            f'[{self.id}] [{epoch:d}, {i:5d}] loss: {running_loss / self.config.log_interval:.3f}')
-                        final_running_loss = running_loss / self.config.log_interval
-                        running_loss = 0.0
-                        # break
+            elif self.config.attack_client == 'LabelFlip':
+                number_of_training_samples = len(self.dataset.get_train_loader())
+                self.logger.info(f'{self.id}: Number of training samples: {number_of_training_samples}')
+                for epoch in range(num_epochs):
+                    for i, (inputs, labels) in enumerate(self.dataset.get_train_loader(), 0):
+                        # random choose 1 to 9
+                        random_number = np.random.randint(1, 10)
+                        labels = (labels + random_number) % 10
+                        inputs, labels = inputs.to(self.device), labels.to(self.device)
+                        self.optimizer.zero_grad()
+                        outputs = self.net(inputs)
+                        loss = self.loss_function(outputs, labels)
+                        loss.backward()
+                        self.optimizer.step()
+                        running_loss += loss.item()
+                        if i % self.config.log_interval == 0:
+                            self.logger.info(
+                                f'[{self.id}] [{epoch:d}, {i:5d}] loss: {running_loss / self.config.log_interval:.3f}')
+                            final_running_loss = running_loss / self.config.log_interval
+                            running_loss = 0.0
+                            # break
+            elif self.config.attack_client == 'Backdoor':
+                number_of_training_samples = len(self.dataset.get_train_loader())
+                self.logger.info(f'{self.id}: Number of training samples: {number_of_training_samples}')
+                for epoch in range(num_epochs):
+                    for i, (inputs, labels) in enumerate(self.dataset.get_train_loader(), 0):
+                        batch = self.backdoor_helper.task.get_batch(i, (inputs, labels))
+                        self.optimizer.zero_grad()
+                        loss = self.backdoor_helper.attack.compute_blind_loss(self.net, self.loss_function, batch, True)
+                        loss.backward()
+                        self.optimizer.step()
+                        running_loss += loss.item()
+                        if i % self.config.log_interval == 0:
+                            self.logger.info(
+                                f'[{self.id}] [{epoch:d}, {i:5d}] loss: {running_loss / self.config.log_interval:.3f}')
+                            final_running_loss = running_loss / self.config.log_interval
+                            running_loss = 0.0
+                            # break
+
         else:
             number_of_training_samples = len(self.dataset.get_train_loader())
             self.logger.info(f'{self.id}: Number of training samples: {number_of_training_samples}')
@@ -122,24 +163,9 @@ class Client(Node):
 
                     # zero the parameter gradients
                     self.optimizer.zero_grad()
-
                     outputs = self.net(inputs)
                     loss = self.loss_function(outputs, labels)
                     running_loss += loss.item()
-
-                    '''
-                    if self.config.defense == 'myWBC' and i != 0:
-                        regular = None
-                        for name, param in self.net.named_parameters():
-                            if 'weight' in name:
-                                ones = torch.ones(param.shape).to(self.device)
-                                regularization = torch.norm(
-                                    param - old_params[name].detach().to(self.device) - old_gradient_mine[
-                                        name].detach().to(self.device) - ones * self.config.lr)
-                                regular = regular + regularization if regular else regularization
-                        regular_loss += regular.item()
-                        loss += self.config.regular_weight * regular
-                    '''
                     loss.backward()
                     self.optimizer.step()
 
@@ -150,7 +176,7 @@ class Client(Node):
                     else:
                         defense_half = False
 
-                    if self.config.defense == 'myWBC' and defense_half:
+                    if self.config.defense in ["myWBC", "myWBC-clip", "myWBC-clipnorm"] and defense_half:
                         if i != 0:
                             loss = None
                             for name, param in self.net.named_parameters():
@@ -162,6 +188,15 @@ class Client(Node):
                             loss = self.config.regular_weight * self.regular_schedule * loss
                             regular_loss += loss.item()
                             loss.backward()
+                            if self.config.defense == "myWBC-clip":
+                                torch.nn.utils.clip_grad_value_(self.net.parameters(), self.config.pert_strength)
+                            # get number of nn parameters in the model
+                            if self.config.defense == "myWBC-clipnorm":
+                                num_params = sum(p.numel() for p in self.net.parameters() if p.requires_grad)
+                                pertubation = np.random.laplace(0, self.config.pert_strength, size=num_params)
+                                # calculate l2 norm of the pertubation
+                                l2_norm = np.linalg.norm(pertubation)
+                                torch.nn.utils.clip_grad_norm_(self.net.parameters(), l2_norm)
                             self.optimizer.step()
                         for name, param in self.net.named_parameters():
                             if 'weight' in name:
@@ -184,10 +219,13 @@ class Client(Node):
                                 changed_ele_num += np.sum(np.abs(grad_diff) > np.abs(pertubation))
                                 all_ele_num += grad_diff.size
                                 changed_magnitude += np.sum(np.abs(grad_diff))
-                                pertubation = np.where(abs(grad_diff) > abs(pertubation), 0, pertubation)
-                                if self.defense == "WBC" and start_defense:
+
+                                if self.defense == "WBC":
+                                    pertubation = np.where(abs(grad_diff) > abs(pertubation), 0, pertubation)
+                                if (self.defense == "WBC" or self.defense == "LDF") and start_defense:
                                     p.data = torch.from_numpy(p.data.cpu().numpy() + pertubation * self.config.lr).to(
                                         self.device)
+
                         hessian_matrix_dict = {'ChangedPercent': changed_ele_num / all_ele_num,
                                                'ChangedMagnitude': changed_magnitude}
                         self.hessian_metrix.append(hessian_matrix_dict)
@@ -291,6 +329,44 @@ class Client(Node):
         self.logger.info(f'Test duration is {duration} seconds')
         return accuracy, loss, confusion_mat
 
+    def backdoor_test(self) -> Tuple[float, float, np.array]:
+        """
+        Function implementing federated learning test loop.
+        @return: Statistics on test-set given a (partially) trained model; accuracy, loss, and confusion matrix.
+        @rtype: Tuple[float, float, np.array]
+        """
+        start_time = time.time()
+        correct = 0
+        total = 0
+        targets_ = []
+        pred_ = []
+        loss = 0.0
+        with torch.no_grad():
+            for i, data in enumerate(self.dataset.get_test_loader()):
+                batch = self.backdoor_helper.task.get_batch(i, data)
+                batch = self.backdoor_helper.attack.synthesizer.make_backdoor_batch(batch, test=True, attack=True)
+                outputs = self.net(batch.inputs)
+                labels = batch.labels
+                _, predicted = torch.max(outputs.data, 1)  # pylint: disable=no-member
+                total += labels.size(0)
+                correct += (predicted == labels).sum().item()
+
+                targets_.extend(labels.cpu().view_as(predicted).numpy())
+                pred_.extend(predicted.cpu().numpy())
+
+                loss += self.loss_function(outputs, labels).item()
+
+        # Calculate learning statistics
+        loss /= len(self.dataset.get_test_loader().dataset)
+        accuracy = 100.0 * correct / total
+
+        confusion_mat = sklearn.metrics.confusion_matrix(targets_, pred_)
+
+        end_time = time.time()
+        duration = end_time - start_time
+        self.logger.info(f'Test duration is {duration} seconds')
+        return accuracy, loss, confusion_mat
+
     def get_client_datasize(self):  # pylint: disable=missing-function-docstring
         return len(self.dataset.get_train_sampler())
 
@@ -321,7 +397,12 @@ class Client(Node):
         time_mark_between = time.time()
         test_conf_matrix = None
         if self.mal:
-            accuracy, test_loss, confusion_mat = self.mal_test()
+            if self.config.attack_client == "Targeted":
+                accuracy, test_loss, confusion_mat = self.mal_test()
+            elif self.config.attack_client == "Backdoor":
+                accuracy, test_loss, confusion_mat = self.backdoor_test()
+            else:
+                accuracy, test_loss, test_conf_matrix = self.test()
         else:
             accuracy, test_loss, test_conf_matrix = self.test()
 
@@ -342,10 +423,9 @@ class Client(Node):
 
 
 if __name__ == '__main__':
-    a = np.ones([5, 2])
-    b = np.zeros([5, 2])
-    print(a > b)
-    # calculate number of elements in a > b
-    print(np.sum(a > b))
-    print(a.size)
-    # get elements number of a
+    num_params = 100
+    pertubation = np.random.laplace(0, 1, size=num_params)
+    # calculate l2 norm of the pertubation
+    l2_norm = np.linalg.norm(pertubation)
+    print(pertubation)
+    print(l2_norm)

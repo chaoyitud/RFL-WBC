@@ -1,7 +1,11 @@
 from fltk.util.config.definitions.aggregate import Aggregations
+from . import bulyan
 from .fed_avg import fed_avg
 from  .median import median
 from .trmean import trimmed_mean
+from .bulyan import bulyan
+from .krum import krum
+from .multiKrum import multiKrum
 def get_aggregation(name: Aggregations):
     """
     Helper function to get specific Aggregation class references.
@@ -16,6 +20,9 @@ def get_aggregation(name: Aggregations):
             Aggregations.median: median,
             Aggregations.trmean: trimmed_mean,
             Aggregations.sum: lambda x: x,
-            Aggregations.avg: lambda x: x*2
+            Aggregations.avg: lambda x: x*2,
+            Aggregations.bulyan: bulyan,
+            Aggregations.krum: krum,
+            Aggregations.multiKrum: multiKrum
         }
     return aggregations_dict[enum_type]

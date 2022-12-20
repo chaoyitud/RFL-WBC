@@ -3,6 +3,7 @@ import torch
 import torch.nn.functional as F
 import torch.nn as nn
 class Cifar10CNN(torch.nn.Module):
+    '''
     def __init__(self):
         super(Cifar10CNN, self).__init__()
         self.conv1 = nn.Conv2d(3, 6, 5)
@@ -56,7 +57,7 @@ class Cifar10CNN(torch.nn.Module):
 
         self.fc1 = torch.nn.Linear(128 * 4 * 4, 128)
 
-        self.softmax = torch.nn.Softmax()
+        self.softmax = torch.nn.Softmax(dim=1)
         self.fc2 = torch.nn.Linear(128, 10)
 
     def forward(self, x): # pylint: disable=missing-function-docstring
@@ -76,6 +77,6 @@ class Cifar10CNN(torch.nn.Module):
 
         x = self.fc1(x)
         x = self.softmax(self.fc2(x))
+        #x = self.fc2(x)
 
         return x
-'''

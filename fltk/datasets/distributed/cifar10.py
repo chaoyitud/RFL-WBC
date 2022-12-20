@@ -49,7 +49,7 @@ class DistCIFAR10Dataset(DistDataset):
         ])
         self.test_dataset = datasets.CIFAR10(root=self.get_args().get_data_path(), train=False, download=True,
                                              transform=transform)
-        self.test_sampler = get_sampler(self.test_dataset, self.args)
+        self.test_sampler = get_sampler(self.test_dataset, self.args, test=True)
         self.test_loader = DataLoader(self.test_dataset, batch_size=self.args.test_batch_size, sampler=self.test_sampler)
 
     def init_mal_dataset(self):

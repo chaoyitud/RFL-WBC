@@ -8,3 +8,6 @@ class Aggregations(Enum):
     sum = 'Sum'
     median = 'median'
     trmean = 'trmean'
+    bulyan = 'bulyan'
+    krum = 'krum'
+    multiKrum = 'multiKrum'

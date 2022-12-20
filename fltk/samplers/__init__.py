@@ -9,7 +9,7 @@ from ..util.config.definitions import DataSampler
 from ..util.log import getLogger
 
 
-def get_sampler(dataset, args):
+def get_sampler(dataset, args, test=False):
     """
     Helper function to get DataSampler configured with corresponding arguments. Returns None when invalid sampler
     configuration was provided.
@@ -26,6 +26,8 @@ def get_sampler(dataset, args):
         method = args.get_sampler()
         msg = f"Using {method} sampler method, with args: {args.get_sampler_args()}"
         logger.debug(msg)
+        if test:
+            method = DataSampler.uniform
 
         if method == DataSampler.uniform:
             sampler = UniformSampler(dataset, num_replicas=args.get_world_size(), rank=args.get_rank())

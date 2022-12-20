@@ -1,27 +1,35 @@
 batch_size: 32
-epochs: 10
-rounds: 500
-num_clients: 100
-num_mal_clients: 1
-attack_epochs: 10
-mal_boost: 5
+epochs: 1
+rounds: 2
+num_clients: 10
+num_mal_clients: 5
+attack_epochs: 1
+selection_method: "consistent"
+mal_clients_per_round: 1
+mal_boost: 1
 wait_for_clients: true
 dataset_name: 'cifar10' # 'cifar10' || 'fashion-mnist' || 'mnist'
 net_name: "Cifar10CNN" # "Cifar10CNN" || "MNISTCNN" || "FashionMNISTCNN"
 # Use cuda is available; setting to false will force CPU
-defense: 'myWBC'
+# defense: 'myWBC'
 regular_weight: 0.1
-cuda: false
-experiment_prefix: 'cifar-longrun'
-wandb_name: 'myWBC-a-0.1'
+cuda: true
+cluster: false
+cluster_stored_rounds: 10
+experiment_prefix: 'test'
+wandb_name: 'lie_vs_wbc'
 offload_stategy: deadline
+# attack_server: 'fangAttack_and_Defense_pattern'
+
 output_location: 'output'
+attack_client: 'TargetedAttack'
 tensor_board_active: true
-clients_per_round: 10
+clients_per_round: 2
 single_machine: true
 use_wandb: true
-sampler: "uniform" # "limit labels" || "q sampler" || "dirichlet" || "uniform" (default)
+data_sampler: "uniform" # "limit labels" || "q sampler" || "dirichlet" || "uniform" (default)
 #sampler: "uniform" # "limit labels" || "q sampler" || "dirichlet" || "uniform" (default)
-sampler_args:
-  - 0.07     # label limit || q probability || alpha || unused
+data_sampler_args:
+  - 2    # label limit || q probability || alpha || unused
   - 42    # random seed || random seed || random seed || unused
+backdoor_config: 'configs/backdoor_tasks/mnist_params.yaml'

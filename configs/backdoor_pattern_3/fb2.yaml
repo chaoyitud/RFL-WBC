@@ -1,0 +1,33 @@
+batch_size: 32
+epochs: 10
+rounds: 80
+num_clients: 100
+num_mal_clients: 10
+attack_epochs: 10
+selection_method: "periodic"
+mal_clients_per_round: 5
+clients_per_round: 10
+mal_boost: 1
+wait_for_clients: true
+dataset_name: 'fashion-mnist' # 'cifar10' || 'fashion-mnist' || 'mnist'
+net_name: "FashionMNISTCNN" # "Cifar10CNN" || "MNISTCNN" || "FashionMNISTCNN"
+# Use cuda is available; setting to false will force CPU
+defense: 'WBC'
+#attack_server: 'lie' # 'fang' || 'lie'
+attack_client: 'Backdoor'
+regular_weight: 0.4
+pert_strength: 0.2
+cuda: false
+experiment_prefix: 'Attack_and_Defense_pattern'
+offload_stategy: deadline
+output_location: 'output'
+tensor_board_active: true
+single_machine: true
+use_wandb: true
+aggregation: 'bulyan' # 'FedAvg' || 'bulyan' || 'trmean' || 'median' || 'krum' || 'bulyan'
+sampler: "uniform" # "limit labels" || "q sampler" || "dirichlet" || "uniform" (default)
+#sampler: "uniform" # "limit labels" || "q sampler" || "dirichlet" || "uniform" (default)
+sampler_args:
+  - 0.07     # label limit || q probability || alpha || unused
+  - 42    # random seed || random seed || random seed || unused
+backdoor_config: 'configs/backdoor_tasks/mnist_params_pattern.yaml'

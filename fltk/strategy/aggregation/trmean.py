@@ -4,7 +4,6 @@ from typing import Dict
 import numpy as np
 import torch
 
-
 def trmean(g, f):
     """ Trimmed mean rule.
   Args:

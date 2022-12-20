@@ -15,6 +15,7 @@ from torch.nn.modules.loss import _Loss
 
 from fltk.util.config.definitions import DataSampler
 from fltk.util.config.definitions.aggregate import Aggregations
+from fltk.util.config.definitions.attack import Attack
 from fltk.util.config.definitions.dataset import Dataset
 from fltk.util.config.definitions.logging import LogLevel
 from fltk.util.config.definitions.net import Nets
@@ -48,6 +49,7 @@ def get_safe_loader() -> yaml.SafeLoader:
 @dataclass_json
 @dataclass
 class Config:
+    # fl setting
     batch_size: int = 1
     test_batch_size: int = 1000
     rounds: int = 2
@@ -61,7 +63,10 @@ class Config:
     scheduler_gamma: float = 0.5
     min_lr: float = 1e-10
     rng_seed = 0
-
+    cluster: bool = False
+    # clients_selection
+    selection_method: str = "random"
+    mal_clients_per_round: int = 0
     # FL-WBC specific
     defense: str = None
     pert_strength: float = 1e-4   # perturbation strength
@@ -74,18 +79,19 @@ class Config:
     attack_epochs: int = 10
     mal_samples: int = 1
     num_mal_clients: int = 5
-
+    attack_client: str = None
+    attack_server: Attack = None
     # Enum
     optimizer: Optimizations = Optimizations.sgd
     optimizer_args = {
         'lr': lr,
         'momentum': momentum
     }
-
+    cluster_stored_rounds: int = 10
     loss_function: Type[_Loss] = torch.nn.CrossEntropyLoss
     # Enum
     log_level: LogLevel = LogLevel.DEBUG
-
+    periodic_selection_period: int = 10
     num_clients: int = 10
     clients_per_round: int = 2
     distributed: bool = True
@@ -115,7 +121,9 @@ class Config:
     # This could be useful when a system is likely to crash midway an experiment
     save_data_append: bool = False
     output_path: Path = field(metadata=config(encoder=str, decoder=Path), default=Path('logging'))
-
+    # backdoor attack
+    backdoor_config: str = 'configs/mnist_params.yaml'
+    backdoor_type: str = '1-pixel'
     def update_rng_seed(self):
         torch.manual_seed(self.rng_seed)
 
